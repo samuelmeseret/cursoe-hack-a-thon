@@ -1,0 +1,4 @@
+# Local secrets; committed examples must contain placeholders only.
+.env
+.env.*
+!.env.example
