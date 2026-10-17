@@ -1,0 +1,42 @@
+{
+  "name": "airlock-lab",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npm run build:worker && concurrently -k -n worker,api,web 'esbuild server/sim-worker.ts --bundle --platform=node --format=esm --outfile=dist/server/sim-worker.js --watch' 'tsx watch server/index.ts' 'vite --host 127.0.0.1'",
+    "build:worker": "esbuild server/sim-worker.ts --bundle --platform=node --format=esm --outfile=dist/server/sim-worker.js",
+    "build": "tsc --noEmit && npm run build:worker && vite build && esbuild server/index.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server/index.js",
+    "start": "node dist/server/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build:worker && vitest run",
+    "setup:arduino": "bash scripts/setup-arduino.sh",
+    "demo:airlock": "tsx scripts/smoke-run.ts",
+    "demo:buzzer": "tsx scripts/smoke-run.ts --buzzer",
+    "test:browser": "npm run build:worker && vitest run tests/compiler.browser.test.ts"
+  },
+  "dependencies": {
+    "archiver": "^7.0.1",
+    "avr8js": "0.21.1",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "@types/archiver": "^6.0.3",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.7.2",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.0.4",
+    "concurrently": "^9.2.1",
+    "esbuild": "^0.25.11",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.10",
+    "vitest": "^5.0.5"
+  }
+}
