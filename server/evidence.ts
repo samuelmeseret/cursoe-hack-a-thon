@@ -7,7 +7,7 @@ export function canonical(value: unknown): string {
   if (value && typeof value === 'object') return '{' + Object.entries(value).filter(([, v]) => v !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => JSON.stringify(k) + ':' + canonical(v)).join(',') + '}';
   return JSON.stringify(value);
 }
-export const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
+export const sha256 = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
 export function artifactHashes(candidate: Candidate, circuit: Circuit, hex: string, spec: RunSpec, scenarios: Scenario[]): ArtifactHashes {
   return { source: sha256(candidate.source), circuit: sha256(canonical(circuit)), hex: sha256(hex), requirements: sha256(canonical(spec)), tests: sha256(canonical(scenarios)) };
 }

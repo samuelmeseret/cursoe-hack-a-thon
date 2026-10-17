@@ -1,5 +1,7 @@
 # Teammate integration guide
 
+This document covers the Arduino workbench at `?workbench=arduino`. The application root now uses the separate [general simulation pipeline](GENERATED_SIMULATIONS.md), which generates a new model and scene from each prompt without the hardware inventory below.
+
 The backend, shared simulation, and minimal harness are ready for the full workbench. Use the checked-in contracts in [`shared/types.ts`](../shared/types.ts); do not create independent frontend copies. The circuit renderer, airlock presentation, readable activity/evidence views, and video are the teammate's scope.
 
 ## Runtime and ownership
@@ -14,6 +16,8 @@ Start with the [README setup](../README.md#local-setup). Vite runs on `http://12
 | Browser worker | `src/simulator.worker.ts` |
 | Authoritative Node worker | `server/simulation.ts`, `server/sim-worker.ts` |
 | Agent/controller/compilation | `server/agents.ts`, `server/controller.ts`, `server/compiler.ts` |
+| Capability discovery and documentation | `server/capabilities.ts` |
+| Keyboard controls and vehicle display | `src/ProjectSimulation.tsx`, `shared/motion.ts` |
 | Evidence, storage, diagram | `server/evidence.ts`, `server/storage.ts`, `server/diagram.ts` |
 | API and minimal integration UI | `server/index.ts`, `src/App.tsx` |
 | Published rehearsal data | `shared/fixtures.ts` |
@@ -82,6 +86,7 @@ Use `SimulatorCommand` to send:
 | `pause` | Pauses the interactive machine |
 | `reset` | Recreates the last loaded machine and clears prior inputs; remains paused |
 | `button` | `componentId`, `pressed`; changes a physical active-low button input |
+| `serial` | `data`; queues ASCII bytes for the Uno USART at the circuit's configured baud rate |
 | `scenario` | `hex`, `circuit`, `scenario`; executes recorded inputs in a fresh machine and returns a result |
 
 The worker sends `SimulatorMessage`:
@@ -101,7 +106,13 @@ The browser worker is for interaction and parity checks. Its `result` message ca
 
 ## Circuit and airlock presentation
 
-The supported circuit is exactly one Uno, at most four buttons and six LEDs, distinct D2–D13 pins, and generated wires/resistors. `Circuit.components` supplies stable logical IDs, labels, meanings, pins, templates, and resistance. Draw the connections in `Circuit.connections`; the existing SVG generator offers a baseline. Do not infer new pins from source text.
+The supported circuit is exactly one Uno, at most four buttons, six LEDs, and two bidirectional motors, with at most twelve distinct D2–D13 pins. Each motor uses `pin` and `reversePin` with an `h-bridge-motor` template, a separate motor supply, and common ground. `Circuit.components` supplies stable logical IDs, labels, meanings, pins, templates, and resistance. Draw the connections in `Circuit.connections`; the existing SVG generator offers a baseline. Do not infer new pins from source text.
+
+Optional `Circuit.serial` and `RunSpec.serial` contain `baudRate` (9600 or 115200) and `controls`: `{key,label,data,releaseData?}`. Keys are single printable characters or arrow keys. Keydown sends `data`; keyup sends `releaseData` if supplied. Commands without release data latch according to generated firmware. Release held keys on blur, hidden document, pause, and reset; ignore global shortcuts while editing a form. The worker forwards these bytes to the actual USART rather than manipulating outputs.
+
+Motor trace names are `${componentId}_forward` and `${componentId}_reverse`. Forward is driven `(1,0)`, reverse `(0,1)`, stop `(0,0)`, and `(1,1)` must fail the required exclusion check. `shared/components.ts` supplies `outputSignals()` for generic output consumers. Optional `presentation: "vehicle"` renders movement derived from the measured motor drive time. It does not establish physical position or speed, and UI animation never grants verification.
+
+Before specifying a live project, `resolveCapabilities()` performs bounded search/read/select actions against the installed adapter catalog. The selected docs are supplied to every agent role. Activity event details expose tool names and module IDs. Adding registry prose alone does not add a device: its typed component, circuit template, executable simulator model, validators, and tests must also exist. `RunState.errorCode` preserves structured agent failures, including `UNSUPPORTED_GOAL`, for actionable UI states and artifact exports.
 
 For the published airlock fixture, IDs are `outerRequest`, `innerRequest`, `outerDoor`, and `innerDoor`. The fixture assigns D2, D3, D8, and D9 respectively; live Builders may choose other approved pins. The diagram must use the current candidate's circuit.
 
@@ -109,7 +120,7 @@ Keep **Live interaction** separate from **Recorded failure**. For failure playba
 
 ## Frozen checks and evidence
 
-`RunSpec` contains the goal, assumptions, component meanings, and numbered requirements. `Candidate` contains source, pin assignments, rationale, and ID. `Scenario` contains duration, timed button inputs, and assertions linked to requirement IDs. No model-generated test JavaScript is accepted.
+`RunSpec` contains the goal, assumptions, component meanings, numbered requirements, and optional serial controls and presentation. `Candidate` contains source, pin assignments, rationale, and ID. `Scenario` contains duration, timed button or serial inputs, and assertions linked to requirement IDs. A serial input has exactly `{atMs,serial}`; a button input retains `{atMs,componentId,pressed}`. No model-generated test JavaScript is accepted.
 
 There are two live Verifier paths, both isolated from Builder code, pin choices, implementation messages, and simulation diagnostics:
 
@@ -120,7 +131,7 @@ For challenge recipes, application code clones the selected baseline scenarios a
 
 Challenge selection allows at most two schema corrections and performs no freeform semantic rewrite of the published checks. Both paths validate and freeze the complete suite before the first candidate build. These pre-freeze corrections are separate from the single permitted implementation replan after builds begin. UI activity and submission copy should describe the challenge's constrained mirror selection accurately, rather than claim its baseline was generated by the model.
 
-The assertion types are `level`, `transition`, `duration`, `mutual-exclusion`, and `deadtime`. Check identities are `scenarioId/assertionId`; assertion IDs must be unique inside their scenario. Duration checks require complete observed intervals. Deadtime measures an actual driven-LOW gap between output activation episodes; initial startup LOW does not count. The validator rejects empty suites, unsupported signals/components, uncovered requirements, and suites that never require useful HIGH output from every LED.
+The assertion types are `level`, `transition`, `duration`, `mutual-exclusion`, and `deadtime`. Check identities are `scenarioId/assertionId`; assertion IDs must be unique inside their scenario. Duration checks require complete observed intervals. Deadtime measures an actual driven-LOW gap between output activation episodes; initial startup LOW does not count. The validator rejects empty suites, unsupported signals/components, uncovered requirements, and suites that never require useful HIGH output from every LED and both directions of every motor. Every motor scenario requires a full-scenario mutual-exclusion check for its direction pair.
 
 `Evidence` binds `runId`, `candidateId`, expected check IDs, timestamp, simulator version, full scenario results, and SHA-256 hashes of source, circuit, HEX, requirements, and tests. Every expected check must execute once and pass. The server re-evaluates trace checks and verifies artifact identity before completion. The display statement is **Verified in simulation — all listed checks passed**.
 

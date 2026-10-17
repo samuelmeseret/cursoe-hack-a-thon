@@ -6,13 +6,14 @@ import { validateCircuit } from './circuit';
 import { evaluateScenario } from './assertions';
 import type { Circuit, CircuitComponent, PinMode, Scenario, ScenarioResult, SignalValue, TracePoint } from './types';
 
-export const SIMULATOR_VERSION = 'airlock-uno-v1/avr8js-0.21.1';
+export const SIMULATOR_VERSION = 'airlock-uno-v2/avr8js-0.21.1';
 export const FREQUENCY_HZ = 16000000;
 export const FLASH_BYTES = 32768;
 export const SRAM_BYTES = 2048;
 export const MAX_TRACE_POINTS = 100000;
 const MAX_SCENARIO_MS = 15000;
 const SETUP_GRACE_MS = 100;
+const MAX_SERIAL_QUEUE_BYTES = 4096;
 
 /** Intel HEX parser with checksum, addressing, overlap, EOF and Uno flash bounds checks. */
 export function parseHex(hex: string): Uint16Array {
@@ -55,7 +56,7 @@ export function parseHex(hex: string): Uint16Array {
   return words;
 }
 
-type AttachedPin = { component: CircuitComponent; port: AVRIOPort; bit: number };
+type AttachedPin = { component: CircuitComponent; signal: string; pinNumber: number; port: AVRIOPort; bit: number };
 
 /**
  * The shared deterministic Node/browser engine. A new instance is a real reset.
@@ -63,12 +64,17 @@ type AttachedPin = { component: CircuitComponent; port: AVRIOPort; bit: number }
  * absolute simulation time, stopping at the first instruction boundary >= ms.
  * setButton() changes a physical active-low input at that boundary. trace records
  * all connected value/mode changes, including atomic port writes and timer PWM.
+ * sendSerial() queues actual USART receive frames; firmware must initialize and
+ * read its UART before any command can affect a motor's GPIO evidence.
  */
 export class UnoMachine {
   readonly cpu: CPU;
   readonly trace: TracePoint[] = [];
   readonly circuit: Circuit;
   private readonly pins: AttachedPin[];
+  private readonly usart: AVRUSART;
+  private readonly serialQueue: number[] = [];
+  private serialUnread = false;
   private readonly pressed = new Map<string, boolean>();
   private readonly states = new Map<string, TracePoint>();
   private setupChecked = false;
@@ -84,8 +90,25 @@ export class UnoMachine {
     new AVRTimer(this.cpu, timer0Config);
     new AVRTimer(this.cpu, timer1Config);
     new AVRTimer(this.cpu, timer2Config);
-    new AVRUSART(this.cpu, usart0Config, FREQUENCY_HZ);
-    this.pins = this.circuit.components.map((component) => ({ component, port: component.pin < 8 ? portD : portB, bit: component.pin < 8 ? component.pin : component.pin - 8 }));
+    this.usart = new AVRUSART(this.cpu, usart0Config, FREQUENCY_HZ);
+    // AVR8js models one receive register. Reject unread-byte overwrite rather
+    // than silently losing commands when firmware stops servicing its UART.
+    const readSerial = this.cpu.readHooks[usart0Config.UDR];
+    this.cpu.readHooks[usart0Config.UDR] = (address) => {
+      this.serialUnread = false;
+      return readSerial(address);
+    };
+    this.usart.onRxComplete = () => {
+      if (this.serialUnread) throw new Error('Serial receive overrun: firmware did not read the previous byte');
+      this.serialUnread = true;
+      this.pumpSerial();
+    };
+    this.pins = this.circuit.components.flatMap((component) => {
+      const attached = (signal: string, pinNumber: number): AttachedPin => ({ component, signal, pinNumber, port: pinNumber < 8 ? portD : portB, bit: pinNumber < 8 ? pinNumber : pinNumber - 8 });
+      return component.kind === 'motor'
+        ? [attached(`${component.id}_forward`, component.pin), attached(`${component.id}_reverse`, component.reversePin!)]
+        : [attached(component.id, component.pin)];
+    });
     for (const { component } of this.pins) if (component.kind === 'button') this.pressed.set(component.id, false);
     for (const port of [portB, portC, portD]) port.addListener(() => this.capture(port));
     // AVR8js pinState reports PORT/DDR pull-ups, but does not apply MCUCR.PUD.
@@ -112,7 +135,7 @@ export class UnoMachine {
     try {
       for (const pin of this.pins) {
         if (port && pin.port !== port) continue;
-        const { component } = pin;
+        const { component, signal } = pin;
         let state = pin.port.pinState(pin.bit);
         if (state === PinState.InputPullUp && (this.cpu.data[0x55] & 0x10)) state = PinState.Input;
         const mode: PinMode = state === PinState.Input ? 'input' : state === PinState.InputPullUp ? 'input-pullup' : 'output';
@@ -125,11 +148,11 @@ export class UnoMachine {
             pin.port.setPin(pin.bit, value === 1);
           } else if (pressed && value === 1) throw new Error(`GPIO contention: ${component.id} drives HIGH into a grounded button`);
         }
-        const previous = this.states.get(component.id);
+        const previous = this.states.get(signal);
         if (!previous || previous.value !== value || previous.mode !== mode) {
           if (this.trace.length >= MAX_TRACE_POINTS) throw new Error(`Signal trace exceeded ${MAX_TRACE_POINTS} transitions`);
-          const point: TracePoint = { cycle: this.cpu.cycles, atMs: this.atMs, signal: component.id, value, mode };
-          this.states.set(component.id, point);
+          const point: TracePoint = { cycle: this.cpu.cycles, atMs: this.atMs, signal, value, mode };
+          this.states.set(signal, point);
           this.trace.push(point);
         }
       }
@@ -139,12 +162,44 @@ export class UnoMachine {
 
   /** Called at scenario completion as well, so sub-100ms tests cannot bypass wiring readiness. */
   validateModes(): void {
-    for (const { component } of this.pins) {
-      const state = this.states.get(component.id)!;
+    for (const { component, signal, pinNumber } of this.pins) {
+      const state = this.states.get(signal)!;
       const required = component.kind === 'button' ? 'input-pullup' : 'output';
-      if (state.mode !== required) throw new Error(`${component.id} on D${component.pin} requires ${required}; observed ${state.mode} at ${this.atMs.toFixed(3)} ms`);
+      if (state.mode !== required) throw new Error(`${signal} on D${pinNumber} requires ${required}; observed ${state.mode} at ${this.atMs.toFixed(3)} ms`);
     }
+    if (this.circuit.serial) this.validateSerial();
     this.setupChecked = true;
+  }
+
+  private validateSerial(): void {
+    const config = this.circuit.serial;
+    if (!config) throw new Error('This circuit has no serial input configured');
+    if (!this.usart.rxEnable) throw new Error(`Serial receiver is disabled; firmware must call Serial.begin(${config.baudRate})`);
+    if (this.usart.bitsPerChar !== 8 || this.usart.stopBits !== 1 || this.usart.parityEnabled || (this.cpu.data[usart0Config.UCSRC] & 0xc0)) {
+      throw new Error('Serial input requires asynchronous 8N1 UART framing');
+    }
+    // Uno baud divisors introduce rounding; Arduino's 115200 setting is 117647.
+    if (Math.abs(this.usart.baudRate - config.baudRate) / config.baudRate > 0.03) {
+      throw new Error(`Serial baud rate mismatch: circuit expects ${config.baudRate}, firmware configured ${this.usart.baudRate}`);
+    }
+  }
+
+  private pumpSerial(): void {
+    if (!this.serialQueue.length || this.usart.rxBusy) return;
+    // Interactive input may arrive before setup executes. Keep it queued during
+    // the existing setup grace, then require a real configured UART receiver.
+    if (!this.usart.rxEnable && this.atMs < SETUP_GRACE_MS) return;
+    this.validateSerial();
+    if (this.usart.writeByte(this.serialQueue[0])) this.serialQueue.shift();
+  }
+
+  sendSerial(data: string): void {
+    if (!this.circuit.serial) throw new Error('This circuit has no serial input configured');
+    if (typeof data !== 'string' || !/^[\x00-\x7f]{1,64}$/.test(data)) throw new Error('Serial input must contain 1–64 ASCII characters');
+    if (this.serialQueue.length + Number(this.usart.rxBusy) + data.length > MAX_SERIAL_QUEUE_BYTES) throw new Error(`Serial transmit queue exceeded ${MAX_SERIAL_QUEUE_BYTES} bytes`);
+    if (this.atMs >= SETUP_GRACE_MS) this.validateSerial();
+    this.serialQueue.push(...Array.from(data, (character) => character.charCodeAt(0)));
+    this.pumpSerial();
   }
 
   setButton(componentId: string, pressed: boolean): void {
@@ -157,6 +212,7 @@ export class UnoMachine {
     if (!Number.isInteger(this.cpu.pc) || this.cpu.pc < 0 || this.cpu.pc >= this.cpu.progMem.length || this.cpu.progMem[this.cpu.pc] === 0xffff) throw new Error(`Execution left programmed firmware at word ${this.cpu.pc}`);
     avrInstruction(this.cpu);
     this.cpu.tick();
+    if (this.serialQueue.length) this.pumpSerial();
     if (this.cpu.SP < 0x100 || this.cpu.SP >= SRAM_BYTES + 0x100) throw new Error('Firmware stack exceeded Uno 2 KB SRAM');
     if (!this.setupChecked && this.atMs >= SETUP_GRACE_MS) this.validateModes();
   }
@@ -177,7 +233,8 @@ export function runScenario(hex: string, circuit: Circuit, scenario: Scenario): 
     for (const input of scenario.inputs) {
       if (!Number.isFinite(input.atMs) || input.atMs < lastAt || input.atMs < 0 || input.atMs > scenario.durationMs) throw new Error('Invalid or unordered scenario inputs');
       machine.runUntil(input.atMs);
-      machine.setButton(input.componentId, input.pressed);
+      if ('serial' in input) machine.sendSerial(input.serial);
+      else machine.setButton(input.componentId, input.pressed);
       lastAt = input.atMs;
     }
     machine.runUntil(scenario.durationMs);

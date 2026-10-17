@@ -1,0 +1,72 @@
+.hardware-panel { border-top: 1px solid var(--line); color: #c1d0c7; font-size: 13px; line-height: 1.65; }
+.hardware-heading { display: flex; justify-content: space-between; align-items: center; gap: 22px; padding: 24px; }
+.hardware-heading h2 { font-size: 18px; font-weight: 500; letter-spacing: -.3px; margin: 0 0 5px; color: #e0ebe4; }
+.hardware-heading p { margin: 0; color: #a3b7aa; font-size: 12px; }
+.hardware-panel button { font-size: 12px; flex-shrink: 0; }
+.hardware-panel a { color: var(--accent); text-underline-offset: 4px; }
+.hardware-panel input:not([type=checkbox]), .hardware-panel select { width: 100%; min-width: 0; border: 1px solid #4c5b53; border-radius: 4px; padding: 9px 10px; background: #11191a; color: #e0ebe5; font-size: 12px; }
+.hardware-panel input::placeholder { color: #8fa399; }
+.hardware-panel input:focus-visible, .hardware-panel select:focus-visible { outline: 2px solid var(--accent); }
+.hardware-panel input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; }
+.hardware-panel input:disabled, .hardware-panel select:disabled { opacity: .55; }
+.hardware-panel label { display: flex; flex-direction: column; gap: 6px; color: #b6c8bd; font: 12px 'IBM Plex Sans', sans-serif; letter-spacing: 0; }
+.hardware-panel code { overflow-wrap: anywhere; white-space: normal; }
+.hardware-panel h3 { font-size: 15px; margin: 0 0 8px; color: #d9e8df; }
+.hardware-panel h4 { font-size: 13px; font-weight: 500; margin: 20px 0 10px; color: #d9e8df; }
+.hardware-panel p { max-width: 75ch; }
+.hardware-progress { display: flex; gap: 22px; margin: 0; padding: 15px 24px; list-style: none; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); counter-reset: hardware-step; color: #94a99c; flex-wrap: wrap; font-size: 12px; }
+.hardware-progress li { counter-increment: hardware-step; }
+.hardware-progress li::before { content: counter(hardware-step) '. '; font-variant-numeric: tabular-nums; }
+.hardware-progress li[aria-current=step] { color: var(--accent); font-weight: 600; }
+.hardware-verification { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 16px 24px 0; font-size: 11px; color: #abb8b0; }
+.hardware-verification span::before { content: ''; display: inline-block; width: 5px; height: 5px; background: #75877d; border-radius: 50%; margin: 0 7px 1px 0; }
+.hardware-verification span[data-passed=true] { color: #b8e4c5; }
+.hardware-verification span[data-passed=true]::before { background: var(--accent); }
+.hardware-section, .hardware-missing { padding: 24px; }
+.hardware-section + .hardware-section { border-top: 1px solid var(--line); }
+.hardware-section-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 8px; }
+.hardware-section-heading h3 { margin: 0; }
+.hardware-search { margin: 20px 0 0; }
+.hardware-search > div { display: flex; gap: 10px; margin-top: 7px; }
+.hardware-catalog ul, .hardware-devices ul { list-style: none; margin: 0; padding: 0; }
+.hardware-catalog ul { max-height: 340px; overflow: auto; scrollbar-width: thin; }
+.hardware-catalog li, .hardware-devices li { display: flex; align-items: center; justify-content: space-between; gap: 18px; border-top: 1px solid #344139; padding: 14px 0; }
+.hardware-catalog li > div, .hardware-devices li > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.hardware-catalog strong, .hardware-devices strong { color: #d9e8df; font-size: 13px; font-weight: 500; }
+.hardware-exact { margin-top: 12px; }
+.hardware-profile dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 24px; margin: 20px 0; }
+.hardware-profile dt { font-size: 11px; color: #97aea0; }
+.hardware-profile dd { margin: 2px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+.hardware-profile ul { padding-left: 20px; }
+.hardware-board-options { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 16px; }
+.hardware-board-options label { flex: 1; min-width: 160px; }
+.hardware-panel .hardware-subheading { margin-top: 28px; }
+.hardware-bindings { margin-top: 20px; }
+.hardware-binding { border: 0; border-top: 1px solid #3c4c41; padding: 18px 0 24px; margin: 0; min-width: 0; }
+.hardware-binding legend { font-size: 14px; font-weight: 500; color: #d7e8dd; padding: 0 12px 0 0; max-width: 100%; overflow-wrap: anywhere; }
+.hardware-binding legend small { font-size: 10px; margin-left: 12px; font-weight: 400; }
+.hardware-binding-fields { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+.hardware-panel .hardware-checkbox { display: flex; flex-direction: row; align-items: center; gap: 8px; margin-top: 12px; }
+.hardware-binding-note { margin-top: 14px; }
+.hardware-range, .hardware-serial-settings { display: flex; gap: 18px; margin-top: 16px; }
+.hardware-range > label, .hardware-serial-settings > label { flex: 1; min-width: 0; }
+.hardware-communication { border: 0; padding-bottom: 0; }
+.hardware-libraries { margin-top: 22px; }
+.hardware-library { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .7fr) auto; align-items: end; gap: 12px; margin-bottom: 15px; }
+.hardware-notice { color: #d6c6a6; font-size: 12px; line-height: 1.65; }
+#hardware-workflow > .hardware-notice, #hardware-workflow > .hardware-error, #hardware-workflow > .hardware-pending { margin: 16px 24px 24px; }
+.hardware-issues { color: #e1c7a3; margin: 20px 0; padding: 14px 0; border-block: 1px solid #66573c; }
+.hardware-issues strong { font-weight: 500; }
+.hardware-issues ul { margin: 8px 0 0; padding-left: 20px; }
+.hardware-actions { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 20px; }
+.hardware-export { padding: 9px 0; font-weight: 500; }
+.hardware-evidence { color: #b8dfc5; font-size: 12px; }
+.hardware-error { color: #f4b8a7; }
+.hardware-pending { color: var(--accent); }
+.hardware-build-log { margin-top: 16px; }
+.hardware-build-log pre { max-height: 320px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
+.hardware-upload { margin-top: 20px; }
+.hardware-upload-controls { display: flex; align-items: end; flex-wrap: wrap; gap: 14px; margin-top: 16px; }
+.hardware-upload-controls > label { flex: 1; min-width: 200px; }
+@media (max-width: 1100px) { .hardware-binding-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); } .hardware-binding-fields > label:first-child { grid-column: 1 / -1; } .hardware-heading { align-items: start; } .hardware-progress { gap: 12px 18px; } }
+@media (max-width: 600px) { .hardware-heading { flex-direction: column; gap: 14px; } .hardware-section, .hardware-missing, .hardware-heading { padding: 20px 17px; } .hardware-progress { padding: 14px 17px; } .hardware-verification { padding-inline: 17px; } .hardware-section-heading { align-items: start; flex-direction: column; gap: 10px; } .hardware-search > div { flex-direction: column; } .hardware-catalog li, .hardware-devices li { align-items: start; flex-direction: column; gap: 12px; } .hardware-library { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .hardware-library button { grid-column: 1 / -1; justify-self: start; } .hardware-profile dl { gap: 14px; } .hardware-binding legend small { display: block; margin-left: 0; } .hardware-range, .hardware-serial-settings { flex-direction: column; gap: 14px; } .hardware-upload-controls > label { min-width: 0; width: 100%; flex-basis: 100%; } .hardware-upload-controls button { white-space: normal; text-align: left; } }

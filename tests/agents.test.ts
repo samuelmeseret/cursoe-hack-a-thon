@@ -33,6 +33,14 @@ const candidateOutput = {
   rationale: 'Use an input pull-up and an active-high status output.',
 };
 const candidate: Candidate = { id: 'candidate-1', ...candidateOutput };
+const carGoal = 'build a mini car that moves forwards and backwards based on commands from a keyboard';
+const carSpec: RunSpec = {
+  goal: carGoal, assumptions: ['Commands remain active until another command changes the direction.'],
+  components: [{ id: 'drive', kind: 'motor', label: 'Drive motor', meaning: 'Moves the car forwards or backwards' }],
+  presentation: 'vehicle',
+  serial: { baudRate: 9600, controls: [{ key: 'w', label: 'Forwards', data: 'F' }, { key: 's', label: 'Backwards', data: 'B' }, { key: ' ', label: 'Stop', data: 'X' }] },
+  requirements: [{ id: 'R1', text: 'Start stopped and respond within 100 ms to F for forward, B for reverse and X for stopped; never drive both directions together.' }],
+};
 
 function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
@@ -144,6 +152,72 @@ describe('Crusoe catalog preflight and server requests', () => {
 });
 
 describe('isolated, typed agent roles', () => {
+  it('discovers and reads actual capabilities before specifying a keyboard-driven motor project', async () => {
+    const { agents, fetchMock } = client([
+      { action: 'search', query: 'keyboard commands motor forward reverse' },
+      { action: 'read', moduleIds: ['serial', 'motor'] },
+      { action: 'select', moduleIds: ['serial', 'motor'], summary: 'Deliver keyboard command bytes to the Uno firmware and drive a bidirectional motor through its H-bridge.' },
+      carSpec,
+    ]);
+    const activity = vi.fn();
+    const resolved = await agents.resolveCapabilities(carGoal, undefined, activity);
+    expect(resolved.moduleIds).toEqual(['uno', 'serial', 'motor']);
+    expect(resolved.documentation).toContain('Serial.available()');
+    expect(resolved.documentation).toContain('reversePin');
+    expect(activity.mock.calls.map(call => call[1].tool)).toEqual(['search', 'read', 'select']);
+    const lastPlannerPayload = JSON.parse(sentBody(fetchMock, 3).messages[1].content);
+    expect(lastPlannerPayload.history[1].result.map((module: { id: string }) => module.id)).toEqual(['uno', 'serial', 'motor']);
+    await expect(agents.specify(carGoal)).resolves.toEqual(carSpec);
+    const system = sentBody(fetchMock, 4).messages[0].content;
+    expect(system).toContain(resolved.documentation);
+    expect(system).not.toContain('Push-button inputs (button, version');
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(fetchMock.mock.calls.every(call => call[0] === `${CRUSOE_BASE_URL}/models` || call[0] === `${CRUSOE_BASE_URL}/chat/completions`)).toBe(true);
+  });
+
+  it('rejects unread or unknown capability selections instead of pretending discovery succeeded', async () => {
+    for (const action of [
+      { action: 'select', moduleIds: ['motor'], summary: 'Use a motor.' },
+      { action: 'read', moduleIds: ['download-and-run-a-script'] },
+    ]) {
+      const { agents, fetchMock } = client([{ action: 'search', query: 'motor' }, action]);
+      await expect(agents.resolveCapabilities(carGoal)).rejects.toMatchObject({ code: 'INVALID_CAPABILITY_ACTION' });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    }
+  });
+
+  it('bounds capability exploration to six actions and respects cancellation', async () => {
+    const { agents, fetchMock } = client(Array.from({ length: 6 }, () => ({ action: 'search', query: 'motor' })));
+    await expect(agents.resolveCapabilities(carGoal)).rejects.toMatchObject({ code: 'CAPABILITY_DISCOVERY_LIMIT' });
+    expect(fetchMock).toHaveBeenCalledTimes(7);
+    const cancelled = client();
+    await expect(cancelled.agents.resolveCapabilities(carGoal, AbortSignal.abort())).rejects.toBeDefined();
+    expect(cancelled.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('carries serial events, motor pins, and real motor failure traces through the verifier and builder', async () => {
+    const motorScenarios: Scenario[] = [{
+      id: 'drive-directions', name: 'Forward, reverse, and stop', durationMs: 1500,
+      inputs: [{ atMs: 200, serial: 'F' }, { atMs: 700, serial: 'B' }, { atMs: 1200, serial: 'X' }],
+      assertions: [
+        { id: 'forward-active', requirementIds: ['R1'], type: 'level', signal: 'drive_forward', value: 1, driven: true, fromMs: 300, toMs: 600 },
+        { id: 'reverse-active', requirementIds: ['R1'], type: 'level', signal: 'drive_reverse', value: 1, driven: true, fromMs: 800, toMs: 1100 },
+        { id: 'direction-exclusive', requirementIds: ['R1'], type: 'mutual-exclusion', signals: ['drive_forward', 'drive_reverse'], fromMs: 0, toMs: 1500 },
+      ],
+    }];
+    const motorCandidate = { source: 'void setup() { Serial.begin(9600); pinMode(5, OUTPUT); pinMode(6, OUTPUT); }\nvoid loop() {}', pins: [{ componentId: 'drive', pin: 5, reversePin: 6 }], rationale: 'Repair serial input handling.' };
+    const { agents, fetchMock } = client([{ scenarios: motorScenarios }, { scenarios: motorScenarios }, motorCandidate]);
+    await expect(agents.verify(carGoal, carSpec)).resolves.toEqual(motorScenarios);
+    const review = JSON.parse(sentBody(fetchMock, 2).messages[1].content);
+    expect(review.inputTimeline[0].buttons).toEqual([]);
+    expect(review.draftScenarios[0].inputs).toEqual(motorScenarios[0].inputs);
+    const trace = [{ atMs: 205, signal: 'drive_forward', value: 1, mode: 'output' }];
+    await expect(agents.build(carSpec, motorScenarios, { attempt: 2, previous: { id: 'candidate-1', ...motorCandidate }, failures: [{ scenario: 'drive-directions', failedChecks: [{ check: 'reverse-active', message: 'Reverse never activated.' }], trace }] })).resolves.toMatchObject({ pins: motorCandidate.pins });
+    const build = JSON.parse(sentBody(fetchMock, 3).messages[1].content);
+    expect(build.failureSummary.representativeScenarios[0].observedOutputTransitions).toEqual(trace);
+    expect(sentBody(fetchMock, 3).messages[0].content).toContain('Serial.available');
+  });
+
   it('sends the independent verifier only the goal and specification', async () => {
     const { agents, fetchMock } = client([{ scenarios }, { scenarios }]);
     const before = JSON.stringify(specification);
@@ -190,7 +264,7 @@ describe('isolated, typed agent roles', () => {
     await expect(agents.verify(goal, spec)).resolves.toEqual(expected);
     expect(JSON.parse(sentBody(fetchMock, 2).messages[1].content).draftScenarios).toEqual(expected);
     expect(JSON.stringify(unordered)).toBe(before);
-    expect(() => validateSuite(unordered, spec)).toThrow('Button inputs must be ordered by time');
+    expect(() => validateSuite(unordered, spec)).toThrow('Scenario inputs must be ordered by time');
   });
 
   it('still rejects invalid references and values when ordering agent inputs', async () => {
@@ -221,6 +295,34 @@ describe('isolated, typed agent roles', () => {
     await expect(emptyTruncated.agents.specify(goal)).rejects.toMatchObject({ code: 'INCOMPLETE_COMPLETION' });
   });
 
+  it.each(['length', 'content_filter'] as const)('reports %s distinctly without exposing provider output or retrying it', async finishReason => {
+    const { agents, fetchMock } = client([], ['max_completion_tokens']);
+    fetchMock.mockResolvedValueOnce(jsonResponse({ choices: [{
+      finish_reason: finishReason,
+      message: {
+        content: `${candidateOutput.source}\nprivate-provider-output\nserver-test-secret`,
+        reasoning_content: 'Private provider reasoning must not be exposed.',
+      },
+    }] }));
+    const error = await agents.generateJson('Return one complete JSON object.', { goal }).catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(AgentError);
+    expect(error).toMatchObject({ code: 'INCOMPLETE_COMPLETION', finishReason });
+    const diagnostic = String(error);
+    if (finishReason === 'length') {
+      expect(diagnostic).toContain('Simulation agent reached the model output limit (9000 tokens requested)');
+      expect(diagnostic).toContain('No truncated output was accepted');
+      expect(diagnostic).not.toContain('provider filtered');
+    } else {
+      expect(diagnostic).toContain('The model provider filtered the simulation agent response');
+      expect(diagnostic).toContain('No generated output was accepted');
+      expect(diagnostic).not.toContain('output limit');
+    }
+    for (const privateValue of [candidateOutput.source, 'private-provider-output', 'server-test-secret', 'Private provider reasoning']) {
+      expect(`${diagnostic}\n${JSON.stringify(error)}`).not.toContain(privateValue);
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('rejects unsupported components, changed goals, and unnumbered requirements', async () => {
     for (const output of [
       { ...specification, components: [{ id: 'servo', kind: 'servo', label: 'Servo', meaning: 'Opens a door' }] },
@@ -230,8 +332,41 @@ describe('isolated, typed agent roles', () => {
       const { agents } = client([output]);
       await expect(agents.specify(goal)).rejects.toMatchObject({ code: 'INVALID_SPEC' });
     }
-    const unsupported = client([{ error: 'UNSUPPORTED_GOAL' }]);
-    await expect(unsupported.agents.specify(goal)).rejects.toMatchObject({ code: 'UNSUPPORTED_GOAL' });
+  });
+
+  it('explains missing adapters without silently substituting a different project', async () => {
+    const unsupportedGoal = 'Build a flying drone that navigates autonomously using a camera.';
+    const reason = 'Flight dynamics and camera navigation adapters are not installed.';
+    const { agents, fetchMock } = client([{ error: 'UNSUPPORTED_GOAL', reason }]);
+    await expect(agents.specify(unsupportedGoal)).rejects.toMatchObject({
+      code: 'UNSUPPORTED_GOAL',
+      message: `${reason} Installed adapters support an Arduino Uno, buttons, LEDs, bidirectional motors, and keyboard commands through serial input.`,
+    });
+    expect(JSON.parse(sentBody(fetchMock).messages[1].content)).toEqual({ goal: unsupportedGoal });
+    expect(sentBody(fetchMock).messages[0].content).toContain('do not silently substitute a different goal');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps legacy unsupported-goal responses useful when no usable reason is supplied', async () => {
+    for (const output of [{ error: 'UNSUPPORTED_GOAL' }, { error: 'UNSUPPORTED_GOAL', reason: ['motor'] }, { error: 'UNSUPPORTED_GOAL', reason: '\n\t' }]) {
+      const { agents } = client([output]);
+      await expect(agents.specify(goal)).rejects.toMatchObject({
+        code: 'UNSUPPORTED_GOAL',
+        message: 'This goal requires a capability that is not installed yet. Installed adapters support an Arduino Uno, buttons, LEDs, bidirectional motors, and keyboard commands through serial input.',
+      });
+    }
+  });
+
+  it('bounds unsupported-goal reasons and redacts credentials before exposing them', async () => {
+    const { agents } = client([{ error: 'UNSUPPORTED_GOAL', reason: `Flight\n\tand\u0000camera input: server-test-secret ${'unsupported '.repeat(100)}` }]);
+    const error = await agents.specify(goal).catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(AgentError);
+    expect(error).toMatchObject({ code: 'UNSUPPORTED_GOAL' });
+    const message = (error as AgentError).message;
+    expect(message).toContain('Flight and camera input: [redacted]');
+    expect(message).not.toContain('server-test-secret');
+    expect(message).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+    expect(message.indexOf(' Installed adapters support')).toBe(300);
   });
 
   it('rejects empty suites, executable test fields, unknown signals, and no-output checks', async () => {
@@ -367,7 +502,7 @@ describe('isolated, typed agent roles', () => {
       const source = baseline.find((scenario) => scenario.id === recipes.extensions[index].baselineScenarioId)!;
       const extra = extras[index];
       expect(extra.durationMs).toBe(source.durationMs);
-      expect(extra.inputs).toEqual(source.inputs.map((input) => ({ ...input, componentId: swap[input.componentId] })));
+      expect(extra.inputs).toEqual(source.inputs.map((input) => 'componentId' in input ? { ...input, componentId: swap[input.componentId] } : input));
       expect(extra.assertions).toHaveLength(source.assertions.length);
       extra.assertions.forEach((assertion, checkIndex) => {
         const sourceCheck = source.assertions[checkIndex];

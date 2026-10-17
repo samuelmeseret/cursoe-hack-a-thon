@@ -1,0 +1,95 @@
+.simulation-workbench { max-width: 1760px; padding: 30px 36px 22px; }
+.sim-header { margin-bottom: 28px; }
+.sim-header h1 { font-size: 33px; }
+.sim-project-subtitle { color: #a7b8ae; font-size: 12px; margin: 8px 0 0; }
+.sim-project-revision { color: #9cb3a5; font-size: 11px; }
+.sim-header-actions { display: flex; gap: 26px; align-items: center; font-size: 12px; }
+.sim-header-actions a { color: var(--muted); text-decoration: none; border-bottom: 1px solid #52615b; padding-bottom: 3px; }
+.sim-connection { display: inline-flex; gap: 8px; align-items: center; color: #b8c8bf; }
+.sim-connection i { width: 6px; height: 6px; border-radius: 50%; background: #b6a06f; }
+.sim-connection i.connected { background: var(--accent); }
+.sim-layout { display: grid; grid-template-columns: 340px minmax(0, 1fr); align-items: start; gap: 24px; }
+.sim-conversation { display: flex; flex-direction: column; position: sticky; top: 20px; height: min(820px, calc(100dvh - 150px)); min-height: 560px; border: 1px solid var(--line); background: #171d1f; border-radius: 6px; overflow: hidden; }
+.sim-conversation-heading { display: flex; align-items: center; justify-content: space-between; padding: 17px 18px; border-bottom: 1px solid var(--line); gap: 8px; }
+.sim-conversation-heading h2 { margin: 0; font-size: 13px; font-weight: 500; }
+.sim-conversation-heading button { padding: 5px 8px; font-size: 11px; border-color: transparent; background: transparent; color: var(--muted); }
+.sim-messages { overflow-y: auto; flex: 1; padding: 22px 20px; scrollbar-width: thin; }
+.sim-introduction { padding-top: 18px; }
+.sim-index { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 1px; color: #89b49b; }
+.sim-introduction h2 { font-size: 28px; line-height: 1.25; font-weight: 450; letter-spacing: -.9px; margin: 23px 0 18px; }
+.sim-introduction p { font-size: 14px; color: #afbfba; line-height: 1.7; }
+.sim-introduction p.muted { font-size: 12px; color: #879b93; }
+.sim-message { margin-bottom: 24px; }
+.sim-message > span { font: 10px 'IBM Plex Mono', monospace; letter-spacing: .8px; color: var(--muted); }
+.sim-message p { white-space: pre-wrap; line-height: 1.65; font-size: 13px; margin: 8px 0; overflow-wrap: anywhere; }
+.sim-message.from-user { border-left: 2px solid #a2e5b9; padding-left: 12px; }
+.sim-message.from-assistant { color: #b6c9be; }
+.sim-build-status { display: flex; align-items: center; gap: 9px; font-size: 12px; padding: 14px 0; border-top: 1px solid #2d3935; }
+.sim-build-status > span { width: 6px; height: 6px; background: var(--accent); border-radius: 50%; }
+.sim-working { animation: sim-breathe 1.5s ease-in-out infinite; }
+@keyframes sim-breathe { 50% { opacity: .25; } }
+.sim-build-status strong { font-weight: 500; }
+.sim-build-events { padding: 0; margin: 0; list-style: none; }
+.sim-build-events li { display: flex; align-items: start; gap: 11px; margin: 10px 0; color: #a0b1a9; }
+.sim-build-events li > span { font: 10px 'IBM Plex Mono', monospace; color: #667e72; padding-top: 3px; }
+.sim-build-events li p { margin: 0; line-height: 1.6; font-size: 12px; }
+.sim-composer { padding: 17px; border-top: 1px solid var(--line); background: #192124; }
+.sim-composer label { display: block; margin-bottom: 10px; font-size: 10px; letter-spacing: .35px; }
+.sim-composer textarea { font-size: 13px; line-height: 1.55; padding: 11px 12px; min-height: 105px; max-height: 240px; background: #111819; border-color: #41574a; }
+.sim-composer textarea::placeholder { color: #82928b; }
+.sim-composer > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.sim-composer small { font-size: 10px; max-width: 96px; }
+.sim-composer button { font-size: 12px; padding: 9px 10px; white-space: nowrap; }
+.sim-composer button span { padding-left: 8px; }
+.sim-build-error, .sim-runtime-error { color: #f2b7a2; font-size: 13px; line-height: 1.6; padding: 14px 18px; background: #352823; border-top: 1px solid #775445; }
+.sim-build-warning { color: #d8c5a0; font-size: 13px; line-height: 1.6; padding: 14px 18px; background: #2b2921; border-top: 1px solid #665b3d; }
+.sim-experiment { min-width: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #171d1f; }
+.sim-empty-scene { min-height: 620px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; padding: 60px clamp(24px, 7vw, 100px); position: relative; overflow: hidden; background-image: linear-gradient(#78957f08 1px, transparent 1px), linear-gradient(90deg, #78957f08 1px, transparent 1px); background-size: 42px 42px; }
+.sim-empty-scene h2 { font-weight: 450; font-size: clamp(25px, 3.3vw, 43px); letter-spacing: -1.5px; max-width: 520px; line-height: 1.2; margin: 22px 0 16px; }
+.sim-empty-scene p { color: #99ada3; line-height: 1.75; font-size: 14px; max-width: 370px; margin: 0; }
+.sim-crosshair { position: absolute; right: 55px; top: 48px; width: 54px; height: 54px; opacity: .5; }
+.sim-crosshair i, .sim-crosshair b { position: absolute; background: #77a58c; }
+.sim-crosshair i { width: 1px; height: 54px; left: 27px; }
+.sim-crosshair b { width: 54px; height: 1px; top: 27px; }
+.is-building .sim-crosshair { animation: sim-breathe 2s ease-in-out infinite; }
+.sim-preview-toolbar { padding: 19px 23px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.sim-preview-toolbar > div:first-child { min-width: 0; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.sim-preview-toolbar h2 { font-size: 16px; font-weight: 500; letter-spacing: -.2px; margin: 0; }
+.sim-preview-toolbar span { font: 11px 'IBM Plex Mono', monospace; color: var(--muted); }
+.sim-playback { display: flex; gap: 8px; }
+.sim-playback button { font-size: 12px; padding: 8px 12px; }
+.sim-frame { display: block; border: 0; width: 100%; height: clamp(340px, 49vw, 560px); background: #111820; }
+.sim-live-values { display: flex; flex-wrap: wrap; padding: 18px 23px; gap: 18px 34px; border-top: 1px solid var(--line); }
+.sim-live-values > div { display: flex; flex-direction: column; gap: 5px; min-width: 86px; }
+.sim-live-values span { color: var(--muted); font-size: 11px; }
+.sim-live-values strong { font: 18px 'IBM Plex Mono', monospace; color: #cbe7d5; overflow-wrap: anywhere; max-width: 100%; }
+.sim-live-values strong small { font: 11px 'IBM Plex Sans', sans-serif; }
+.sim-controls-panel { padding: 18px 23px 22px; border-top: 1px solid var(--line); }
+.sim-controls-panel h3 { margin: 0 0 18px; font-size: 12px; color: #b9c9bf; }
+.sim-control-grid { display: flex; align-items: end; flex-wrap: wrap; gap: 18px 25px; }
+.sim-control { flex: 1 1 180px; max-width: 360px; }
+.sim-control label { display: flex; align-items: center; gap: 9px; font-family: 'IBM Plex Sans', sans-serif; font-size: 12px; letter-spacing: 0; margin-bottom: 8px; }
+.sim-control output { color: #bde1c9; font: 11px 'IBM Plex Mono', monospace; margin-left: auto; }
+.sim-control input[type=range] { display: block; width: 100%; accent-color: #a2e5b9; }
+.sim-control input[type=checkbox] { accent-color: #a2e5b9; width: 16px; height: 16px; }
+.sim-control select { width: 100%; font-size: 12px; padding: 8px; }
+.sim-control button { display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 12px; touch-action: none; width: 100%; }
+.sim-control button[aria-pressed=true] { border-color: #a2e5b9; background: #294937; }
+.sim-control kbd { font: 11px 'IBM Plex Mono', monospace; border: 1px solid #758b7d; border-bottom-width: 2px; padding: 3px 6px; border-radius: 3px; }
+.sim-control.control-button, .sim-control.control-key { flex: 0 1 auto; min-width: 115px; }
+.sim-preview-caption { display: flex; justify-content: space-between; gap: 16px; padding: 14px 23px; border-top: 1px solid var(--line); font-size: 11px; color: #91a99a; }
+.sim-preview-caption a { color: #b0d9bd; text-decoration: none; white-space: nowrap; }
+.sim-inspector { border-top: 1px solid var(--line); }
+.sim-inspector nav { display: flex; padding: 0 10px; gap: 2px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.sim-inspector nav button { border: 0; background: none; border-bottom: 2px solid transparent; border-radius: 0; color: var(--muted); font-size: 12px; padding: 15px 13px; white-space: nowrap; }
+.sim-inspector nav button[aria-pressed=true] { border-bottom-color: #a2e5b9; color: #dceadd; }
+.sim-inspector > div { padding: 18px 23px 24px; font-size: 12px; line-height: 1.7; max-height: 420px; overflow: auto; color: #b9c7c0; }
+.sim-inspector p:first-child { margin-top: 0; }
+.sim-inspector ul { padding-left: 20px; margin: 18px 0; }
+.sim-inspector li { margin: 8px 0; }
+.sim-inspector pre { font-size: 11px; }
+.sim-inspector details { padding: 12px 0; }
+@media (min-width: 1500px) { .sim-layout { grid-template-columns: 380px minmax(0, 1fr); gap: 30px; } }
+@media (max-width: 1000px) { .simulation-workbench { padding: 24px 18px; } .sim-layout { grid-template-columns: 300px minmax(0, 1fr); gap: 16px; } .sim-empty-scene { padding: 38px 28px; } .sim-header-actions { gap: 16px; } .sim-preview-toolbar { padding: 16px; align-items: start; } .sim-preview-caption { flex-direction: column; gap: 8px; } }
+@media (max-width: 760px) { .sim-layout { grid-template-columns: 1fr; } .sim-conversation { position: static; height: auto; min-height: 0; } .sim-messages { max-height: 340px; } .sim-introduction { padding-top: 0; } .sim-introduction h2 { font-size: 26px; margin-top: 12px; } .sim-introduction h2 br { display: none; } .sim-introduction p { margin: 12px 0; } .sim-introduction p.muted { display: none; } .sim-composer textarea { min-height: 90px; } .sim-composer small { max-width: none; } .sim-header { gap: 14px; align-items: start; } .sim-header h1 { font-size: 28px; } .sim-header-actions { align-items: end; flex-direction: column; gap: 11px; font-size: 11px; } .sim-empty-scene { min-height: 360px; } .sim-frame { height: 390px; } .sim-control-grid { gap: 16px; } .sim-live-values { gap: 18px 25px; } }
+@media (prefers-reduced-motion: reduce) { .sim-working, .is-building .sim-crosshair { animation: none; } }

@@ -1,0 +1,26 @@
+.vehicle-view { padding: 22px 24px 16px; background: #151d20; }
+.vehicle-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.vehicle-heading strong { color: var(--accent); font-size: 16px; font-weight: 500; }
+.vehicle-heading span, .vehicle-view p { color: var(--muted); font-size: 12px; }
+.vehicle-view p { margin: 12px 0 0; line-height: 1.6; }
+.vehicle-scene { position: relative; height: 225px; overflow: hidden; }
+.vehicle-road { position: absolute; left: 0; right: 0; top: 172px; height: 35px; border-top: 2px solid #668276; background-image: repeating-linear-gradient(90deg, transparent 0 38px, #50625b 38px 62px, transparent 62px 100px); background-size: 100px 2px; background-position-y: 19px; background-repeat: repeat-x; }
+.mini-car { position: absolute; left: calc(50% - 76px); top: 83px; width: 152px; height: 90px; }
+.car-cabin { position: absolute; left: 26px; top: 0; width: 84px; height: 42px; border: 3px solid #a2e5b9; border-radius: 17px 21px 0 0; background: #2d4b44; transform: skew(12deg); }
+.car-cabin i { position: absolute; left: 39px; height: 37px; width: 3px; background: #a2e5b9; }
+.car-body { position: absolute; left: 0; top: 34px; width: 152px; height: 39px; border-radius: 9px 18px 8px 8px; background: #a2e5b9; border-bottom: 6px solid #5e9976; }
+.car-body i { position: absolute; left: 3px; top: 8px; width: 6px; height: 10px; border-radius: 2px; background: #a74436; }
+.car-body b { position: absolute; right: 3px; top: 8px; width: 9px; height: 12px; border-radius: 3px; background: #edf5c4; }
+.car-wheel { position: absolute; top: 58px; width: 32px; height: 32px; border: 6px solid #0c1012; border-radius: 50%; background: linear-gradient(90deg, #839890 0 42%, #d3ded7 42% 58%, #839890 58%); box-shadow: 0 0 0 2px #4b5c55; }
+.car-wheel.back { left: 18px; }
+.car-wheel.front { right: 18px; }
+.vehicle-wiring { padding: 12px 24px; font-size: 12px; }
+.keyboard-controls { padding: 0 20px 16px; }
+.keyboard-controls > p { font-size: 13px; color: var(--muted); }
+.keyboard-controls .toolbar { gap: 8px; margin: 0; }
+.keyboard-controls button { display: flex; align-items: center; gap: 10px; font-size: 13px; touch-action: none; }
+.keyboard-controls button[aria-pressed=true] { border-color: var(--accent); background: #294536; }
+.keyboard-controls kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 27px; padding: 0 5px; border: 1px solid #75877d; border-bottom-width: 3px; border-radius: 4px; font-family: 'IBM Plex Mono', monospace; color: #dcebdd; }
+.motor span { text-transform: capitalize; font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
+.motor.forward, .motor.reverse { border-color: var(--accent); background: #23392d; }
+@media (max-width: 600px) { .vehicle-view { padding: 18px 16px 12px; } .vehicle-heading { align-items: flex-start; } .vehicle-heading span { max-width: 100px; text-align: right; } .keyboard-controls .toolbar > * { min-width: 130px; } }

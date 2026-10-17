@@ -1,13 +1,14 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Server } from 'node:http';
 import { EventEmitter } from 'node:events';
+import { inflateRawSync } from 'node:zlib';
 import { createApp } from '../server/index';
 import type { RunController } from '../server/controller';
 import type { RunEvent, RunState } from '../shared/types';
 
 const servers: Server[] = [];
 afterEach(async () => { await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()); }))); });
-const run: RunState = { id: 'test-run', goal: 'A test goal', mode: 'generate', inference: 'fixture', status: 'FAILED', createdAt: new Date().toISOString(), deadlineAt: new Date().toISOString(), attempts: [], replanCount: 0, events: [1, 2, 3].map(sequence => ({ sequence, at: new Date().toISOString(), agent: 'controller', kind: sequence === 3 ? 'terminal' : 'activity', message: `event ${sequence}` })) };
+const run: RunState = { id: 'test-run', goal: 'A test goal', mode: 'generate', inference: 'fixture', status: 'FAILED', error: 'This goal requires unsupported hardware.', errorCode: 'UNSUPPORTED_GOAL', createdAt: new Date().toISOString(), deadlineAt: new Date().toISOString(), attempts: [], replanCount: 0, events: [1, 2, 3].map(sequence => ({ sequence, at: new Date().toISOString(), agent: 'controller', kind: sequence === 3 ? 'terminal' : 'activity', message: `event ${sequence}` })) };
 async function serve() {
   const events = new EventEmitter();
   const controller = { events, get: async (id: string) => id === run.id ? structuredClone(run) : undefined, cancel: async (id: string) => id === run.id ? { ...run, status: 'CANCELLED' } : undefined, start: async () => structuredClone(run) } as unknown as RunController;
@@ -29,7 +30,7 @@ describe('local API contract', () => {
   });
   it('retrieves, cancels, and rejects unknown runs', async () => {
     const { base } = await serve();
-    expect((await (await fetch(base + '/api/runs/test-run')).json()).status).toBe('FAILED');
+    expect(await (await fetch(base + '/api/runs/test-run')).json()).toMatchObject({ status: 'FAILED', errorCode: 'UNSUPPORTED_GOAL', error: run.error });
     expect((await (await fetch(base + '/api/runs/test-run/cancel', { method: 'POST' })).json()).status).toBe('CANCELLED');
     expect((await fetch(base + '/api/runs/missing')).status).toBe(404);
   });
@@ -48,7 +49,13 @@ describe('local API contract', () => {
   it('exports a ZIP artifact snapshot with the report', async () => {
     const { base } = await serve(); const response = await fetch(base + '/api/runs/test-run/artifacts');
     expect(response.status).toBe(200); expect(response.headers.get('content-disposition')).toContain('.zip');
-    const bytes = new Uint8Array(await response.arrayBuffer()); expect([...bytes.slice(0, 2)]).toEqual([80, 75]);
-    expect(Buffer.from(bytes).includes(Buffer.from('verification-report.json'))).toBe(true);
+    const bytes = Buffer.from(await response.arrayBuffer()); expect([...bytes.subarray(0, 2)]).toEqual([80, 75]);
+    // This failed run has no artifacts; its first and only ZIP entry is the report.
+    const nameLength = bytes.readUInt16LE(26);
+    const extraLength = bytes.readUInt16LE(28);
+    expect(bytes.subarray(30, 30 + nameLength).toString()).toBe('verification-report.json');
+    const report = JSON.parse(inflateRawSync(bytes.subarray(30 + nameLength + extraLength)).toString());
+    expect(report).toMatchObject({ status: 'FAILED', errorCode: 'UNSUPPORTED_GOAL', error: run.error, attempts: [] });
+    expect(report.evidence).toBeUndefined();
   });
 });

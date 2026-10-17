@@ -7,7 +7,8 @@ import { generateCircuit } from '../shared/circuit.js';
 import { validateCandidate, validateSpec, validateSuite } from '../shared/validation.js';
 import { SIMULATOR_VERSION } from '../shared/simulator.js';
 import { airlockSpec, airlockScenarios, badAirlockCandidate, goodAirlockCandidate, buzzerSpec, buzzerScenarios, goodBuzzerCandidate } from '../shared/fixtures.js';
-import { CrusoeAgents } from './agents.js';
+import { AgentError, CrusoeAgents } from './agents.js';
+import type { ResolvedCapabilities } from './capabilities.js';
 import { compileCandidate } from './compiler.js';
 import { runSimulation } from './simulation.js';
 import { artifactHashes, canonical, createEvidence, evidencePasses, hasObservedOverlap, sha256 } from './evidence.js';
@@ -20,6 +21,7 @@ const DEADLINE_MS = 180_000;
 export interface AgentService {
   readonly model?: string;
   validateModel(signal?: AbortSignal): Promise<void>;
+  resolveCapabilities?(goal: string, signal?: AbortSignal, onActivity?: (message: string, details?: unknown) => void): Promise<ResolvedCapabilities>;
   specify(goal: string, signal?: AbortSignal): Promise<RunSpec>;
   verify(goal: string, spec: RunSpec, signal?: AbortSignal, baseline?: Scenario[]): Promise<Scenario[]>;
   build(spec: RunSpec, scenarios: Scenario[], context: { attempt: number; previous?: Candidate; failures?: unknown; replan?: string }, signal?: AbortSignal): Promise<Candidate>;
@@ -115,6 +117,15 @@ export class RunController {
     let lastFailureSet: string | undefined;
     const fingerprints = new Set<string>();
     try {
+      if (run.inference === 'crusoe' && this.agents.resolveCapabilities) {
+        this.status(run, 'SPECIFYING', 'specifier', 'Discovering the components, input methods, and firmware APIs needed for this project.');
+        const capabilities = await this.agents.resolveCapabilities(run.goal, signal, (message, details) => {
+          signal.throwIfAborted();
+          this.event(run, 'specifier', 'activity', message, details);
+        });
+        signal.throwIfAborted();
+        this.event(run, 'specifier', 'activity', capabilities.summary, { capabilityModules: capabilities.moduleIds });
+      }
       this.status(run, 'SPECIFYING', run.inference === 'fixture' ? 'controller' : 'specifier', run.mode === 'airlock-repair' ? 'Loading the published airlock challenge contract.' : 'Making the goal explicit: assumptions, components, and numbered requirements.');
       const isBuzzer = run.inference === 'fixture' && run.mode !== 'airlock-repair';
       const generatedSpec = run.inference === 'crusoe' ? await this.agents.specify(run.goal, signal) : undefined;
@@ -228,6 +239,7 @@ export class RunController {
       if (run.status !== 'CANCELLED') {
         run.status = 'FAILED';
         run.error = signal.aborted ? String(signal.reason?.message ?? 'Run aborted') : error instanceof Error ? error.message : String(error);
+        run.errorCode = !signal.aborted && error instanceof AgentError ? error.code : undefined;
         this.event(run, 'controller', 'terminal', run.error);
       }
     } finally {

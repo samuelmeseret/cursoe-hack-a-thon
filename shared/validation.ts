@@ -1,7 +1,8 @@
 import type { Assertion, Candidate, RunSpec, Scenario } from './types';
+import { outputSignals } from './components';
 
 const ID = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
-const specKeys = ['goal', 'assumptions', 'components', 'requirements'];
+const specKeys = ['goal', 'assumptions', 'components', 'requirements', 'serial', 'presentation'];
 function record(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object`);
   return value as Record<string, unknown>;
@@ -26,6 +27,9 @@ function list(value: unknown, label: string, min: number, max: number): asserts 
 function unique(values: unknown[], label: string) {
   if (new Set(values).size !== values.length) throw new Error(`${label} must be unique`);
 }
+function serialData(value: unknown, label: string): asserts value is string {
+  if (typeof value !== 'string' || !/^[\x00-\x7f]{1,64}$/.test(value)) throw new Error(`${label} must contain 1–64 ASCII characters`);
+}
 
 /** Validate untrusted JSON before it becomes the frozen logical contract. */
 export function validateSpec(input: unknown): RunSpec {
@@ -34,22 +38,44 @@ export function validateSpec(input: unknown): RunSpec {
   text(spec.goal, 'Goal');
   list(spec.assumptions, 'Assumptions', 0, 30);
   spec.assumptions.forEach((item) => text(item, 'Assumption', 2000));
-  list(spec.components, 'Components', 1, 10);
+  list(spec.components, 'Components', 1, 12);
   const components = spec.components.map((item) => {
     const c = record(item, 'Component');
     keys(c, ['id', 'kind', 'label', 'meaning'], 'Component');
     id(c.id, 'Component ID');
-    if (c.kind !== 'button' && c.kind !== 'led') throw new Error(`Unsupported component kind: ${c.kind}`);
+    if (c.kind !== 'button' && c.kind !== 'led' && c.kind !== 'motor') throw new Error(`Unsupported component kind: ${c.kind}`);
     text(c.label, 'Component label', 100);
     text(c.meaning, 'Component meaning', 2000);
     return c;
   });
   unique(components.map((c) => c.id), 'Component IDs');
   const componentIds = new Set(components.map(c => c.id));
-  if (componentIds.has('uno') || components.some(c => c.kind === 'led' && componentIds.has(`${c.id}-resistor`))) throw new Error('Component IDs collide with the Uno or a generated resistor ID');
+  const generatedIds = components.flatMap(c => c.kind === 'led' ? [`${c.id}-resistor`] : c.kind === 'motor' ? [`${c.id}-driver`, `${c.id}-supply`, `${c.id}_forward`, `${c.id}_reverse`] : []);
+  if (componentIds.has('uno') || generatedIds.some(generated => componentIds.has(generated))) throw new Error('Component IDs collide with the Uno or a generated component or signal ID');
   if (components.filter((c) => c.kind === 'button').length > 4) throw new Error('At most four buttons are supported');
   if (components.filter((c) => c.kind === 'led').length > 6) throw new Error('At most six LEDs are supported');
-  if (!components.some((c) => c.kind === 'led')) throw new Error('At least one observable LED output is required');
+  if (components.filter((c) => c.kind === 'motor').length > 2) throw new Error('At most two motors are supported');
+  if (components.reduce((count, c) => count + (c.kind === 'motor' ? 2 : 1), 0) > 12) throw new Error('Components require more than the twelve available D2–D13 pins');
+  if (!components.some((c) => c.kind === 'led' || c.kind === 'motor')) throw new Error('At least one observable LED or motor output is required');
+  if (spec.presentation !== undefined && spec.presentation !== 'circuit' && spec.presentation !== 'vehicle') throw new Error('Presentation must be circuit or vehicle');
+  if (spec.presentation === 'vehicle' && !components.some(c => c.kind === 'motor')) throw new Error('Vehicle presentation requires a motor');
+  if (spec.serial !== undefined) {
+    const serial = record(spec.serial, 'Serial configuration');
+    keys(serial, ['baudRate', 'controls'], 'Serial configuration');
+    if (serial.baudRate !== 9600 && serial.baudRate !== 115200) throw new Error('Serial baud rate must be 9600 or 115200');
+    list(serial.controls, 'Serial controls', 1, 12);
+    const controlKeys: string[] = [];
+    for (const item of serial.controls) {
+      const control = record(item, 'Serial control');
+      keys(control, ['key', 'label', 'data', 'releaseData'], 'Serial control');
+      if (typeof control.key !== 'string' || !/^(?:[\x20-\x7e]|ArrowUp|ArrowDown|ArrowLeft|ArrowRight)$/.test(control.key)) throw new Error('Serial control key must be a printable character or an arrow key');
+      controlKeys.push(control.key.toLowerCase());
+      text(control.label, 'Serial control label', 100);
+      serialData(control.data, 'Serial control data');
+      if (control.releaseData !== undefined) serialData(control.releaseData, 'Serial control release data');
+    }
+    unique(controlKeys, 'Serial control keys');
+  }
   list(spec.requirements, 'Requirements', 1, 30);
   const requirements = spec.requirements.map((item) => {
     const r = record(item, 'Requirement');
@@ -71,13 +97,16 @@ export function validateCandidate(spec: RunSpec, input: unknown): Candidate {
   list(candidate.pins, 'Pin assignments', spec.components.length, spec.components.length);
   const pins = candidate.pins.map((item) => {
     const p = record(item, 'Pin assignment');
-    keys(p, ['componentId', 'pin'], 'Pin assignment');
-    if (!spec.components.some((c) => c.id === p.componentId)) throw new Error(`Unknown component: ${p.componentId}`);
+    keys(p, ['componentId', 'pin', 'reversePin'], 'Pin assignment');
+    const component = spec.components.find((c) => c.id === p.componentId);
+    if (!component) throw new Error(`Unknown component: ${p.componentId}`);
     number(p.pin, 'Uno pin', 2, 13, true);
+    if (component.kind === 'motor') number(p.reversePin, 'Motor reverse pin', 2, 13, true);
+    else if (p.reversePin !== undefined) throw new Error('Only motors may have a reverse pin');
     return p;
   });
   unique(pins.map((p) => p.componentId), 'Assigned components');
-  unique(pins.map((p) => p.pin), 'Assigned pins');
+  unique(pins.flatMap((p) => p.reversePin === undefined ? [p.pin] : [p.pin, p.reversePin]), 'Assigned pins');
   return structuredClone(input) as Candidate;
 }
 
@@ -85,7 +114,8 @@ export function validateCandidate(spec: RunSpec, input: unknown): Candidate {
 export function validateSuite(input: unknown, spec: RunSpec): Scenario[] {
   list(input, 'Scenario suite', 1, 32);
   const requirements = new Set(spec.requirements.map((r) => r.id));
-  const signals = new Set(spec.components.filter((c) => c.kind === 'led').map((c) => c.id));
+  const signals = new Set(outputSignals(spec.components));
+  const motors = spec.components.filter(c => c.kind === 'motor');
   const buttons = new Set(spec.components.filter((c) => c.kind === 'button').map((c) => c.id));
   const covered = new Set<string>();
   const checks: string[] = [];
@@ -104,11 +134,20 @@ export function validateSuite(input: unknown, spec: RunSpec): Scenario[] {
     let lastAt = -1;
     const inputTimes = new Set<string>();
     for (const item of s.inputs) {
-      const event = record(item, 'Button input');
-      keys(event, ['atMs', 'componentId', 'pressed'], 'Button input');
+      const event = record(item, 'Scenario input');
       number(event.atMs, 'Input time', 0, s.durationMs);
-      if (event.atMs < lastAt) throw new Error('Button inputs must be ordered by time');
+      if (event.atMs < lastAt) throw new Error('Scenario inputs must be ordered by time');
       lastAt = event.atMs;
+      if ('serial' in event) {
+        keys(event, ['atMs', 'serial'], 'Serial input');
+        if (!spec.serial) throw new Error('Serial inputs require serial configuration');
+        serialData(event.serial, 'Serial input data');
+        const key = `${event.atMs}:serial`;
+        if (inputTimes.has(key)) throw new Error('Serial inputs at one time must be combined into one command');
+        inputTimes.add(key);
+        continue;
+      }
+      keys(event, ['atMs', 'componentId', 'pressed'], 'Button input');
       if (!buttons.has(event.componentId as string)) throw new Error(`Invalid button input: ${event.componentId}`);
       if (typeof event.pressed !== 'boolean') throw new Error('Button pressed must be boolean');
       const key = `${event.atMs}:${event.componentId}`;
@@ -137,7 +176,7 @@ export function validateSuite(input: unknown, spec: RunSpec): Scenario[] {
       number(a.fromMs, `Assertion start (${s.id}/${a.id})`, 0, s.durationMs);
       number(a.toMs, `Assertion end (${s.id}/${a.id})`, a.fromMs, s.durationMs);
       if (a.type === 'mutual-exclusion' || a.type === 'deadtime') {
-        list(a.signals, 'Grouped output signals', a.type === 'deadtime' ? 1 : 2, 6);
+        list(a.signals, 'Grouped output signals', a.type === 'deadtime' ? 1 : 2, 10);
         unique(a.signals, 'Grouped output signals');
         for (const signal of a.signals) if (!signals.has(signal as string)) throw new Error(`Invalid output signal: ${signal}`);
         if (a.type === 'deadtime') {
@@ -166,6 +205,15 @@ export function validateSuite(input: unknown, spec: RunSpec): Scenario[] {
           if (a.value === 1) useful.add(a.signal as string);
         }
       }
+    }
+    for (const motor of motors) {
+      const pair = [`${motor.id}_forward`, `${motor.id}_reverse`];
+      if (!s.assertions.some(item => {
+        const assertion = item as Record<string, unknown>;
+        const grouped = assertion.signals;
+        return assertion.type === 'mutual-exclusion' && assertion.fromMs === 0 && assertion.toMs === s.durationMs
+          && Array.isArray(grouped) && pair.every(signal => grouped.includes(signal));
+      })) throw new Error(`Scenario ${s.id} must forbid simultaneous forward and reverse signals for motor ${motor.id} throughout the scenario`);
     }
   }
   unique(scenarios, 'Scenario IDs');

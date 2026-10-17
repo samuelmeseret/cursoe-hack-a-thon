@@ -10,6 +10,8 @@ import { compilerAvailable } from './compiler.js';
 import { artifactDirectory, json } from './storage.js';
 import { circuitSvg } from './diagram.js';
 import type { RunEvent } from '../shared/types.js';
+import { simulationRoutes } from './simulation-routes.js';
+import { hardwareCatalogRoutes } from './hardware-routes.js';
 
 export function createApp(controller = new RunController()) {
   const app = express();
@@ -29,6 +31,8 @@ export function createApp(controller = new RunController()) {
   app.get('/api/health', async (_req, res) => {
     res.json({ status: 'ok', model: process.env.CRUSOE_MODEL || 'deepseek-ai/Deepseek-V4-Flash', keyConfigured: Boolean(process.env.CRUSOE_API_KEY), compilerAvailable: await compilerAvailable(), artifactDirectory });
   });
+  app.use('/api/simulations', simulationRoutes());
+  app.use('/api/hardware', hardwareCatalogRoutes());
   const startSchema = z.object({ goal: z.string().trim().min(5).max(5000), mode: z.enum(['generate', 'airlock-repair']), inference: z.enum(['crusoe', 'fixture']).optional() }).strict();
   app.post('/api/runs', async (req, res) => {
     const input = startSchema.safeParse(req.body);
@@ -91,7 +95,7 @@ export function createApp(controller = new RunController()) {
       'requirements.json': run.spec ? json(run.spec) : undefined, 'tests.json': run.scenarios ? json(run.scenarios) : undefined,
     };
     for (const [name, content] of Object.entries(artifacts)) if (content !== undefined) archive.append(content, { name });
-    archive.append(JSON.stringify({ status: run.status, error: run.error, inference: run.inference, model: run.model, statement: 'Passing the listed simulator checks is not a claim about physical hardware.', evidence: run.evidence, originalFailure: run.failureEvidence, attempts: run.attempts, events: run.events }, null, 2), { name: 'verification-report.json' });
+    archive.append(JSON.stringify({ status: run.status, error: run.error, errorCode: run.errorCode, inference: run.inference, model: run.model, statement: 'Passing the listed simulator checks is not a claim about physical hardware.', evidence: run.evidence, originalFailure: run.failureEvidence, attempts: run.attempts, events: run.events }, null, 2), { name: 'verification-report.json' });
     await archive.finalize();
   });
   const web = path.resolve('dist/client');
@@ -104,5 +108,5 @@ export function createApp(controller = new RunController()) {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT || 3001);
   const { app } = createApp();
-  app.listen(port, '127.0.0.1', () => console.log(`Airlock Lab API: http://127.0.0.1:${port}`));
+  app.listen(port, '127.0.0.1', () => console.log(`Simulation Lab API: http://127.0.0.1:${port}`));
 }

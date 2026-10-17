@@ -66,6 +66,11 @@ scope.onmessage = (event: MessageEvent<SimulatorCommand>) => {
         machine.setButton(command.componentId, command.pressed);
         report();
         break;
+      case 'serial':
+        if (!machine) throw new Error('No firmware loaded');
+        machine.sendSerial(command.data);
+        report();
+        break;
       case 'scenario':
         pause();
         send({ type: 'result', result: runScenario(command.hex, command.circuit, command.scenario) });
@@ -75,6 +80,7 @@ scope.onmessage = (event: MessageEvent<SimulatorCommand>) => {
     }
   } catch (error) {
     pause();
+    report();
     send({ type: 'error', message: error instanceof Error ? error.message : String(error) });
   }
 };

@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { RunController, type AgentService } from '../server/controller';
+import { AgentError } from '../server/agents';
 import { artifactHashes, createEvidence, evidencePasses } from '../server/evidence';
 import { runDirectory } from '../server/storage';
 import { generateCircuit } from '../shared/circuit';
@@ -52,6 +53,40 @@ describe('application completion gate', () => {
   });
 });
 describe('bounded run controller', () => {
+  it('preserves unsupported-goal failures before creating any implementation or verification evidence', async () => {
+    const goal = 'Build a flying drone with a live camera feed over Wi-Fi.';
+    const error = new AgentError('UNSUPPORTED_GOAL', 'Camera and Wi-Fi adapters are not installed.');
+    const deps = dependencies({ specify: vi.fn(async () => { throw error; }) });
+    const controller = new RunController(deps);
+    const run = (await controller.wait((await controller.start({ ...request, goal })).id))!;
+
+    expect(run.status).toBe('FAILED');
+    expect(run.errorCode).toBe('UNSUPPORTED_GOAL');
+    expect(run.error).toBe(error.message);
+    expect(deps.agents.specify).toHaveBeenCalledWith(goal, expect.any(AbortSignal));
+    for (const nextStep of [deps.agents.verify, deps.agents.build, deps.agents.replan, deps.compile, deps.simulate]) expect(nextStep).not.toHaveBeenCalled();
+    expect(run.attempts).toEqual([]);
+    expect(run.spec).toBeUndefined();
+    expect(run.scenarios).toBeUndefined();
+    expect(run.evidence).toBeUndefined();
+    expect(run.failureEvidence).toBeUndefined();
+    expect(run.events.at(-1)).toMatchObject({ kind: 'terminal', message: error.message });
+    const saved = JSON.parse(await readFile(path.join(runDirectory(run.id), 'run.json'), 'utf8'));
+    expect(saved).toMatchObject({ status: 'FAILED', errorCode: 'UNSUPPORTED_GOAL', error: error.message });
+  });
+  it('resolves project capabilities before specification and preserves discovery activity', async () => {
+    const resolveCapabilities = vi.fn(async (_goal: string, _signal?: AbortSignal, onActivity?: (message: string, details?: unknown) => void) => {
+      onActivity?.('Read LED documentation.', { tool: 'read', moduleIds: ['uno', 'led'] });
+      return { moduleIds: ['uno', 'led'], summary: 'Use the Uno and an LED.', documentation: 'Trusted adapter documentation.' };
+    });
+    const deps = dependencies({ resolveCapabilities });
+    const controller = new RunController(deps);
+    const run = (await controller.wait((await controller.start(request)).id))!;
+    expect(run.status).toBe('VERIFIED');
+    expect(resolveCapabilities.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(deps.agents.specify).mock.invocationCallOrder[0]);
+    expect(run.events).toContainEqual(expect.objectContaining({ message: 'Read LED documentation.', details: { tool: 'read', moduleIds: ['uno', 'led'] } }));
+    expect(run.events).toContainEqual(expect.objectContaining({ details: { capabilityModules: ['uno', 'led'] } }));
+  });
   it('freezes independent tests before build and verifies only current artifacts', async () => {
     const deps = dependencies(); const controller = new RunController(deps);
     const started = await controller.start(request); const run = (await controller.wait(started.id))!;
@@ -133,6 +168,15 @@ describe('bounded run controller', () => {
     const deps = dependencies({ specify: vi.fn((_goal, signal) => new Promise<RunSpec>((_resolve, reject) => signal!.addEventListener('abort', () => reject(signal!.reason), { once: true }))) });
     const controller = new RunController({ ...deps, deadlineMs: 20 }); const run = (await controller.wait((await controller.start(request)).id))!;
     expect(run.status).toBe('FAILED'); expect(run.error).toMatch(/deadline/);
+    expect(run.errorCode).toBeUndefined();
+  });
+  it('does not attach a provider error code when the run deadline aborts inference', async () => {
+    const deps = dependencies({ specify: vi.fn((_goal, signal) => new Promise<RunSpec>((_resolve, reject) => signal!.addEventListener('abort', () => reject(new AgentError('REQUEST_FAILED', 'Provider request was aborted')), { once: true }))) });
+    const controller = new RunController({ ...deps, deadlineMs: 20 });
+    const run = (await controller.wait((await controller.start(request)).id))!;
+    expect(run.status).toBe('FAILED');
+    expect(run.error).toMatch(/deadline/);
+    expect(run.errorCode).toBeUndefined();
   });
   it('model preflight rejects unavailable models before a run starts', async () => {
     const deps = dependencies({ validateModel: vi.fn(async () => { throw new Error('Model unavailable'); }) });
