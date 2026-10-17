@@ -1,0 +1,86 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource/ibm-plex-sans/latin-400.css";
+@import "@fontsource/ibm-plex-sans/latin-500.css";
+@import "@fontsource/ibm-plex-sans/latin-600.css";
+@import "@fontsource/ibm-plex-mono/latin-400.css";
+@import "@fontsource/ibm-plex-mono/latin-500.css";
+
+@custom-variant dark (&:is(.dark *));
+@theme inline {
+  --font-sans: "IBM Plex Sans", sans-serif;
+  --font-mono: "IBM Plex Mono", monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--card);
+  --color-popover-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--foreground);
+  --color-muted: var(--secondary);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--hover-surface);
+  --color-accent-foreground: var(--foreground);
+  --color-destructive: var(--status-fail);
+  --color-border: var(--border);
+  --color-input: var(--border);
+  --color-ring: var(--ring);
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+}
+
+:root {
+  color-scheme: light;
+  /* All neutrals belong to the same warm stone family. */
+  --background: #c8c1b7;
+  --surface-shell: #faf8f5;
+  --surface-context: #f6f3ee;
+  --card: #fffdfa;
+  --secondary: #efebe5;
+  --hover-surface: #e7e1d8;
+  --selected-surface: #eae5dd;
+  --foreground: #3c3732;
+  --muted-foreground: #746d64;
+  --text-muted: #736a60;
+  --border: #e3ddd4;
+  --primary: #302c28;
+  --primary-hover: #494239;
+  --primary-foreground: #fffdfa;
+  --ring: #8b7b69;
+  --selection: #e0d7ca;
+  --line-number: #80796f;
+  --radius: 12px;
+  /* Equal perceptual lightness and chroma, with only hue changing. */
+  --agent-planner: oklch(54% 0.055 135);
+  --agent-coder: oklch(54% 0.055 55);
+  --agent-verifier: oklch(54% 0.055 325);
+  --agent-supervisor: oklch(54% 0.055 220);
+  --agent-compile: #827b72;
+  --agent-sim: #93897d;
+  --status-pass: oklch(49% 0.085 145);
+  --status-fail: oklch(49% 0.085 25);
+  --status-running: #62594f;
+  --supervisor-decision: oklch(49% 0.085 80);
+  --decision-border: #ded2ba;
+  --decision-surface: #f4f0e8;
+  --pass-surface: #edf0e9;
+  --fail-surface: #f3ece8;
+}
+
+@layer base {
+  * { @apply border-border; box-sizing: border-box; }
+  html { font-family: var(--font-sans); background: var(--background); }
+  body { margin: 0; color: var(--foreground); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+  button, textarea { font: inherit; }
+  code, pre, kbd, samp, time { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  button { cursor: pointer; }
+  button:disabled { cursor: default; }
+  :focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+  ::selection { background: var(--selection); color: var(--foreground); }
+}
