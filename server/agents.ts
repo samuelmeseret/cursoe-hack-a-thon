@@ -3,7 +3,7 @@ import { validateCandidate, validateSpec, validateSuite } from '../shared/valida
 import { outputSignals } from '../shared/components.js';
 import { capabilityCatalog, capabilityDocumentation, readCapabilities, searchCapabilities, type ResolvedCapabilities } from './capabilities.js';
 
-export const DEFAULT_CRUSOE_MODEL = 'deepseek-ai/Deepseek-V4-Flash';
+export const DEFAULT_CRUSOE_MODEL = 'nvidia/NVIDIA-Nemotron-3.5-Super-VL';
 export const CRUSOE_BASE_URL = 'https://api.inference.crusoecloud.com/v1';
 
 export interface CrusoeAgentConfig {
@@ -406,7 +406,8 @@ export class CrusoeAgents {
     if (!model) {
       throw new AgentError('MODEL_UNAVAILABLE', 'The configured CRUSOE_MODEL is not available in this account. Choose an ID from the Crusoe model catalog.');
     }
-    if (model.type !== undefined && model.type !== 'chat') {
+    const supportsTextChat = model.type === 'multimodal' && Array.isArray(model.tags) && model.tags.includes('text to text');
+    if (model.type !== undefined && model.type !== 'chat' && !supportsTextChat) {
       throw new AgentError('MODEL_UNSUPPORTED', 'The configured Crusoe model does not support chat completions.');
     }
     const supported = model.supported_parameters;
@@ -586,6 +587,8 @@ export class CrusoeAgents {
     const thinking = options.thinking ?? role === 'Builder';
     if (parameters.has('chat_template_kwargs') && /^deepseek-ai\/.*v4/i.test(this.model)) {
       request.chat_template_kwargs = thinking ? { thinking: true, reasoning_effort: 'low' } : { thinking: false };
+    } else if (parameters.has('chat_template_kwargs') && /^nvidia\/(?:nvidia-)?nemotron-3\.5-super-vl(?:-|$)/i.test(this.model)) {
+      request.chat_template_kwargs = thinking ? { enable_thinking: true, medium_effort: true } : { enable_thinking: false };
     }
     const tokenParameter = parameters.has('max_completion_tokens') ? 'max_completion_tokens' : parameters.has('max_tokens') ? 'max_tokens' : undefined;
     const requestedTokens = options.maxCompletionTokens ?? (role === 'Builder' ? 24_000 : 12_000);

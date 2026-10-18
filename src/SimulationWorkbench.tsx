@@ -13,6 +13,7 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
 }
 const phaseLabel: Record<string, string> = { QUEUED: 'Starting', PLANNING: 'Defining the model', DESIGNING_TESTS: 'Designing checks', BUILDING: 'Writing the simulation', CHECKING: 'Checking behavior', READY: 'Ready to explore', DRAFT: 'Draft · behavior not verified', FAILED: 'Build needs a revision', CANCELLED: 'Build cancelled', STALE: 'Saved files changed' };
 const hasPreview = (status: string) => ['READY', 'DRAFT'].includes(status);
+const prepareControllerPrompt = 'Prepare this project for hardware by creating a portable controller and a separate visual environment that runs it. Preserve the existing device behavior, physics, controls and units. Remove any simulated export buttons or flags that claim a controller exists or hardware was exported; hardware export belongs to the application. Declare any missing physical drivers or interfaces explicitly. I will choose the board after the controller is ready.';
 
 export function SimulationWorkbench() {
   const [prompt, setPrompt] = useState('');
@@ -92,15 +93,18 @@ export function SimulationWorkbench() {
     return () => { alive = false; events.close(); clearInterval(poll); };
   }, [preview?.id, run?.id]);
   useEffect(() => { conversation.current?.scrollTo({ top: conversation.current.scrollHeight, behavior: 'instant' }); }, [run?.messages.length, run?.events.length]);
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    if (active || prompt.trim().length < 5) return;
+  const startRevision = async (request: string, clearPrompt = false) => {
+    if (active || request.trim().length < 5) return;
     setStarting(true); setError('');
     try {
-      const next = await api<SimulationRun>('/api/simulations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: prompt.trim(), ...(run ? { previousId: run.id } : {}) }) });
-      acceptRun(next, true); setPrompt(''); history.replaceState(null, '', `?simulation=${next.id}`);
+      const next = await api<SimulationRun>('/api/simulations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: request.trim(), ...(run ? { previousId: run.id } : {}) }) });
+      acceptRun(next, true); if (clearPrompt) setPrompt(''); history.replaceState(null, '', `?simulation=${next.id}`);
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setStarting(false); }
+  };
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    void startRevision(prompt, true);
   };
   const newSimulation = () => { currentRun.current = undefined; setRun(undefined); acceptPreview(); setPrompt(''); setError(''); history.replaceState(null, '', location.pathname); document.getElementById('simulation-prompt')?.focus(); };
   const inspected = run ?? preview;
@@ -135,7 +139,7 @@ export function SimulationWorkbench() {
           : inspector === 'checks' ? <>{verification?.error && <p className="fail">{verification.error}</p>}{verification?.results.map(result => <details key={result.scenarioId}><summary>{result.name} · {result.checks.filter(check => check.passed).length}/{result.checks.length}</summary>{result.error && <p className="fail">{result.error}</p>}{result.checks.map(check => <p className={check.passed ? 'pass' : 'fail'} key={check.id}>{check.passed ? 'PASS' : 'FAIL'} · {check.message}</p>)}</details>)}{!verification && <p>{inspected.status === 'DRAFT' ? `Behavior checks could not be completed. ${inspected.warning ?? ''}` : 'Checks have not run for this build yet.'}</p>}<small>These checks exercise the generated model; they do not establish real-world accuracy.</small></>
           : inspected.candidate?.controller ? <><details open><summary>Shared controller · simulation and firmware</summary><pre>{JSON.stringify(inspected.candidate.controller, null, 2)}</pre></details><details><summary>Visual environment</summary><pre>{inspected.candidate.environmentSource}</pre></details></> : <pre>{inspected.candidate?.source}</pre>}</div>
         </div>}
-        {run && <HardwarePanel key={run.id} run={run} busy={active}/>}
+        {run && <HardwarePanel key={run.id} run={run} busy={active} onPrepareController={() => void startRevision(prepareControllerPrompt)}/>}
       </section>
     </div>
     <footer>Describe → simulate → choose hardware → configure → build/check → export<span>Physical testing is reported separately</span></footer>

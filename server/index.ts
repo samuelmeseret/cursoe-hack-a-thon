@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import { z } from 'zod';
 import { RunController } from './controller.js';
+import { DEFAULT_CRUSOE_MODEL } from './agents.js';
 import { compilerAvailable } from './compiler.js';
 import { artifactDirectory, json } from './storage.js';
 import { circuitSvg } from './diagram.js';
@@ -29,7 +30,7 @@ export function createApp(controller = new RunController()) {
     next();
   });
   app.get('/api/health', async (_req, res) => {
-    res.json({ status: 'ok', model: process.env.CRUSOE_MODEL || 'deepseek-ai/Deepseek-V4-Flash', keyConfigured: Boolean(process.env.CRUSOE_API_KEY), compilerAvailable: await compilerAvailable(), artifactDirectory });
+    res.json({ status: 'ok', model: process.env.CRUSOE_MODEL || DEFAULT_CRUSOE_MODEL, keyConfigured: Boolean(process.env.CRUSOE_API_KEY), compilerAvailable: await compilerAvailable(), artifactDirectory });
   });
   app.use('/api/simulations', simulationRoutes());
   app.use('/api/hardware', hardwareCatalogRoutes());

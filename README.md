@@ -15,7 +15,7 @@ npx playwright install chromium
 cp .env.example .env
 ```
 
-Set `CRUSOE_API_KEY` in `.env`. The default model is `deepseek-ai/Deepseek-V4-Flash`; `CRUSOE_MODEL` must be available in the account catalog. Credentials stay in the Node backend. Browser verification uses the installed Playwright Chromium, `CHROME_EXECUTABLE_PATH`, or installed Google Chrome on macOS.
+Set `CRUSOE_API_KEY` in `.env`. The default model is `nvidia/NVIDIA-Nemotron-3.5-Super-VL` (Nemotron 3.5 Super VL); `CRUSOE_MODEL` must be available in the account catalog. Credentials stay in the Node backend. Browser verification uses the installed Playwright Chromium, `CHROME_EXECUTABLE_PATH`, or installed Google Chrome on macOS.
 
 ```sh
 npm run dev

@@ -157,6 +157,43 @@ describe('simulation workbench conversation and saved results', () => {
     expect(new URL(page.url()).searchParams.has('run')).toBe(false);
   });
 
+  it.each(['READY', 'DRAFT', 'STALE', 'FAILED', 'CANCELLED'] as const)('prepares an older %s simulation for hardware through a new project revision', async status => {
+    const { runs, start } = await mockApi();
+    runs.set(baseline.id, { ...structuredClone(baseline), status });
+    const building = updateRun('BUILDING');
+    runs.set(building.id, building);
+    const pending = deferred<SimulationRun>();
+    start.mockReturnValueOnce(pending.promise);
+    await page.goto(`${origin}/?simulation=${baseline.id}`);
+    const hasPreview = status === 'READY' || status === 'DRAFT';
+    if (hasPreview) await waitForPreview();
+    await page.getByLabel('Continue the conversation').fill('Keep this unsent note');
+    await page.getByRole('button', { name: 'Choose hardware', exact: true }).click();
+    await page.getByRole('button', { name: 'Create portable controller', exact: true }).click();
+    await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+    expect(start.mock.calls[0][0]).toMatchObject({ previousId: baseline.id, prompt: expect.stringContaining('portable controller and a separate visual environment that runs it') });
+    expect(start.mock.calls[0][0].prompt).toContain('Remove any simulated export buttons');
+    expect(await page.getByRole('button', { name: 'Create portable controller', exact: true }).isDisabled()).toBe(true);
+    pending.resolve(building);
+    await page.waitForFunction(() => new URL(location.href).searchParams.get('simulation') === 'drain-update');
+    expect(await page.getByLabel('Continue the conversation').inputValue()).toBe('Keep this unsent note');
+    if (hasPreview) expect(await page.locator('iframe').getAttribute('title')).toBe(baseline.spec!.title);
+    expect(await page.getByRole('button', { name: 'Create portable controller', exact: true }).count()).toBe(0);
+  });
+
+  it('keeps a controller preparation failure retryable without losing the saved simulation', async () => {
+    await mockApi();
+    await page.route('**/api/simulations', route => route.fulfill({ status: 409, json: { error: 'A simulation is already being built.' } }));
+    await page.goto(`${origin}/?simulation=${baseline.id}`);
+    await waitForPreview();
+    await page.getByRole('button', { name: 'Choose hardware', exact: true }).click();
+    await page.getByRole('button', { name: 'Create portable controller', exact: true }).click();
+    await page.getByRole('alert').filter({ hasText: 'A simulation is already being built.' }).waitFor();
+    expect(await page.getByRole('button', { name: 'Create portable controller', exact: true }).isEnabled()).toBe(true);
+    expect(new URL(page.url()).searchParams.get('simulation')).toBe(baseline.id);
+    expect(await page.locator('iframe').getAttribute('title')).toBe(baseline.spec!.title);
+  });
+
   it('opens a runnable draft with controls while keeping its missing behavior verification explicit', async () => {
     const { runs } = await mockApi();
     const draft: SimulationRun = {

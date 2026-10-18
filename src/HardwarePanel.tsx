@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { HardwareBinding, HardwareConfiguration, HardwareProjectState, BindingKind } from '../shared/hardware-project';
 import type { BoardCatalogEntry, ConnectedDevice, HardwareCatalog, HardwareProfile } from '../shared/hardware-types';
-import type { SimulationRun } from '../shared/simulation-run';
+import { simulationTerminal, type SimulationRun } from '../shared/simulation-run';
 import './hardware-panel.css';
 
 async function hardwareApi<T>(path: string, init?: RequestInit): Promise<T> {
@@ -14,7 +14,7 @@ const errorMessage = (error: unknown) => error instanceof Error ? error.message 
 const jsonRequest = (method: string, body?: unknown): RequestInit => ({ method, headers: { 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 const bindingLabels: Record<BindingKind, string> = { serial: 'USB / serial', 'digital-input': 'Digital input', 'analog-input': 'Analog input', 'digital-output': 'Digital output', 'pwm-output': 'PWM output' };
 
-export function HardwarePanel({ run, busy = false }: { run: SimulationRun; busy?: boolean }) {
+export function HardwarePanel({ run, busy = false, onPrepareController }: { run: SimulationRun; busy?: boolean; onPrepareController?: () => void }) {
   const controller = run.candidate?.controller;
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<HardwareProjectState>();
@@ -182,7 +182,12 @@ export function HardwarePanel({ run, busy = false }: { run: SimulationRun; busy?
   return <section className="hardware-panel" id="project-hardware" aria-labelledby="hardware-heading">
     <div className="hardware-heading"><div><h2 id="hardware-heading">Bring this project to hardware</h2><p>The controller you simulate becomes the controller on your device.</p></div><button type="button" aria-expanded={open} aria-controls="hardware-workflow" disabled={busy} onClick={() => setOpen(value => !value)}>{open ? 'Hide hardware' : state?.configuration ? 'Configure hardware' : 'Choose hardware'}</button></div>
     {open && <div id="hardware-workflow">
-      {!controller ? <div className="hardware-missing"><h3>This simulation needs a portable controller</h3><p>{run.candidate?.hardwareUnavailableReason ?? 'Its behavior currently lives in browser source. Ask for a follow-up that separates device control from the visual environment. Hardware export becomes available once the simulation runs that shared controller.'}</p><p className="muted">No firmware has been generated or compiled for this revision.</p></div> : <>
+      {!controller ? <div className="hardware-missing">
+        <h3>This simulation needs a portable controller</h3>
+        <p>{run.candidate?.hardwareUnavailableReason ?? 'This revision stores its behavior in browser code. Create a new revision that shares its device controller between the simulation and hardware.'}</p>
+        {onPrepareController && run.candidate && run.spec && simulationTerminal(run.status) && <button type="button" className="primary" disabled={locked} onClick={onPrepareController}>Create portable controller</button>}
+        <p className="muted">No firmware has been generated or compiled for this revision.</p>
+      </div> : <>
         <ol className="hardware-progress" aria-label="Hardware workflow"><li aria-current={!draft ? 'step' : undefined}>Choose hardware</li><li aria-current={draft && (!state?.configuration || dirty) ? 'step' : undefined}>Configure</li><li aria-current={state?.configuration && !dirty && !canExport ? 'step' : undefined}>Build & check</li><li aria-current={canExport ? 'step' : undefined}>Export</li></ol>
         <div className="hardware-verification" aria-label="Verification status">
           <span data-passed={Boolean(savedEvidence?.generated)}>Generated{savedEvidence?.generated ? '' : ' · pending'}</span>

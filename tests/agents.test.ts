@@ -51,7 +51,7 @@ function completion(output: unknown, finishReason = 'stop'): Response {
 function client(outputs: unknown[] = [], supported: string[] = [], config: { timeoutMs?: number; maxProviderTokens?: number } = {}) {
   const { maxProviderTokens = 9000, ...agentConfig } = config;
   const fetchMock = vi.fn<typeof fetch>();
-  fetchMock.mockResolvedValueOnce(jsonResponse({ data: [{ id: DEFAULT_CRUSOE_MODEL, type: 'chat', supported_parameters: supported, top_provider: { max_completion_tokens: maxProviderTokens } }] }));
+  fetchMock.mockResolvedValueOnce(jsonResponse({ data: [{ id: DEFAULT_CRUSOE_MODEL, type: 'multimodal', tags: ['text to text', 'image text to text'], supported_parameters: supported, top_provider: { max_completion_tokens: maxProviderTokens } }] }));
   for (const output of outputs) fetchMock.mockResolvedValueOnce(completion(output));
   return { agents: new CrusoeAgents({ apiKey: 'server-test-secret', fetch: fetchMock, ...agentConfig }), fetchMock };
 }
@@ -67,7 +67,7 @@ describe('Crusoe catalog preflight and server requests', () => {
     expect(fetchMock.mock.calls[1][0]).toBe(`${CRUSOE_BASE_URL}/chat/completions`);
     expect(sentBody(fetchMock)).toMatchObject({
       model: DEFAULT_CRUSOE_MODEL,
-      response_format: { type: 'json_object' }, temperature: 0.2, reasoning_effort: 'low', max_completion_tokens: 9000, chat_template_kwargs: { thinking: false },
+      response_format: { type: 'json_object' }, temperature: 0.2, reasoning_effort: 'low', max_completion_tokens: 9000, chat_template_kwargs: { enable_thinking: false },
     });
     expect(fetchMock.mock.calls[1][1]?.headers).toMatchObject({ Authorization: 'Bearer server-test-secret' });
     expect(fetchMock.mock.calls[1][1]?.redirect).toBe('error');
@@ -81,6 +81,16 @@ describe('Crusoe catalog preflight and server requests', () => {
     const { agents, fetchMock } = client([specification]);
     await agents.specify(goal);
     expect(Object.keys(sentBody(fetchMock)).sort()).toEqual(['messages', 'model']);
+  });
+
+  it.each([false, true])('preserves DeepSeek V4 reasoning controls when thinking is %s', async thinking => {
+    const model = 'deepseek-ai/DeepSeek-V4-Pro';
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ data: [{ id: model, type: 'chat', supported_parameters: ['chat_template_kwargs'] }] }))
+      .mockResolvedValueOnce(completion({ ok: true }));
+    const agents = new CrusoeAgents({ apiKey: 'secret', model, fetch: fetchMock });
+    await expect(agents.generateJson('Return JSON.', {}, undefined, { thinking })).resolves.toEqual({ ok: true });
+    expect(sentBody(fetchMock).chat_template_kwargs).toEqual(thinking ? { thinking: true, reasoning_effort: 'low' } : { thinking: false });
   });
 
   it('rejects a missing model before generating anything', async () => {
@@ -136,7 +146,7 @@ describe('Crusoe catalog preflight and server requests', () => {
   });
 
   it('rejects non-chat models and malformed supported-parameter catalogs', async () => {
-    for (const model of [{ type: 'embedding' }, { supported_parameters: [123] }]) {
+    for (const model of [{ type: 'embedding' }, { type: 'multimodal' }, { type: 'multimodal', tags: ['text to image'] }, { supported_parameters: [123] }]) {
       const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(jsonResponse({ data: [{ id: DEFAULT_CRUSOE_MODEL, ...model }] }));
       const agents = new CrusoeAgents({ apiKey: 'secret', fetch: fetchMock });
       await expect(agents.validateModel()).rejects.toBeInstanceOf(AgentError);
@@ -620,12 +630,12 @@ describe('isolated, typed agent roles', () => {
     await agents.replan(specification, scenarios, candidate, []);
     await agents.verify(airlockSpec.goal, airlockSpec, undefined, airlockScenarios);
     for (const index of [1, 2, 3, 4, 7]) {
-      expect(sentBody(fetchMock, index).chat_template_kwargs).toEqual({ thinking: false });
+      expect(sentBody(fetchMock, index).chat_template_kwargs).toEqual({ enable_thinking: false });
       expect(sentBody(fetchMock, index).max_completion_tokens).toBe(12_000);
     }
-    expect(sentBody(fetchMock, 5).chat_template_kwargs).toEqual({ thinking: true, reasoning_effort: 'low' });
+    expect(sentBody(fetchMock, 5).chat_template_kwargs).toEqual({ enable_thinking: true, medium_effort: true });
     expect(sentBody(fetchMock, 5).max_completion_tokens).toBe(24_000);
-    expect(sentBody(fetchMock, 6).chat_template_kwargs).toEqual({ thinking: true, reasoning_effort: 'low' });
+    expect(sentBody(fetchMock, 6).chat_template_kwargs).toEqual({ enable_thinking: true, medium_effort: true });
     expect(sentBody(fetchMock, 6).max_completion_tokens).toBe(6000);
     expect(JSON.parse(sentBody(fetchMock, 4).messages[1].content)).not.toHaveProperty('previousCandidate');
     expect(JSON.parse(sentBody(fetchMock, 5).messages[1].content)).toHaveProperty('previousCandidate.source', candidate.source);
@@ -636,7 +646,7 @@ describe('isolated, typed agent roles', () => {
     const { agents, fetchMock } = client([{ scenarios: [] }, { scenarios }, { scenarios }], ['chat_template_kwargs', 'max_completion_tokens'], { maxProviderTokens: 32_000 });
     await agents.verify(goal, specification);
     for (const index of [1, 2, 3]) {
-      expect(sentBody(fetchMock, index).chat_template_kwargs).toEqual({ thinking: false });
+      expect(sentBody(fetchMock, index).chat_template_kwargs).toEqual({ enable_thinking: false });
       expect(sentBody(fetchMock, index).max_completion_tokens).toBe(12_000);
     }
   });

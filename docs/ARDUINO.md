@@ -21,7 +21,7 @@ On an existing checkout, preserve your existing `.env`. Put a Crusoe Intelligenc
 | Setting | Default / purpose |
 |---|---|
 | `CRUSOE_API_KEY` | Required for real inference; optional for explicit offline rehearsals |
-| `CRUSOE_MODEL` | `deepseek-ai/Deepseek-V4-Flash`; must exist in the account catalog |
+| `CRUSOE_MODEL` | `nvidia/NVIDIA-Nemotron-3.5-Super-VL`; must exist in the account catalog |
 | `CRUSOE_BASE_URL` | `https://api.inference.crusoecloud.com/v1` |
 | `PORT` | Backend port `3001` |
 | `ARTIFACT_DIR` | `~/.local/share/airlock-lab/runs`; keep artifacts outside Git |

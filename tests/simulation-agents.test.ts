@@ -42,7 +42,7 @@ const source = `function createSimulation() {
     draw(ctx, width, height) { ctx.clearRect(0, 0, width, height); ctx.fillRect(20, 20, Math.min(width - 40, population), 20); }
   };
 }`;
-const output = { source, rationale: 'Integrate the declared population model using elapsed simulation time.' };
+const legacyOutput = { source, rationale: 'Integrate the declared population model using elapsed simulation time.' };
 const portableController: PortableControllerProgram = {
   version: 1, name: 'Nutrient supply controller', requiredCapabilities: ['serial'],
   inputs: [{ id: 'nutrients', label: 'Nutrient supply', type: 'boolean', initial: false, hardware: { kind: 'serial' } }],
@@ -61,6 +61,8 @@ const portableEnvironment = `function createEnvironment(controller) {
 }`;
 const controllerPart = { controller: portableController, rationale: 'The serial controller determines the commanded growth rate.' };
 const environmentPart = { environmentSource: portableEnvironment, rationale: 'The environment integrates population from the authoritative commanded rate.' };
+const output = { ...controllerPart, ...environmentPart };
+const candidate = (value = output, attempt = 1) => validateSimulationCandidate({ id: `candidate-${attempt}`, ...value });
 
 function reviewed(suite: SimulationScenario[]) {
   return { scenarios: suite, calculations: suite.flatMap(scenario => scenario.steps.flatMap(step => step.type === 'assert'
@@ -74,7 +76,7 @@ function response(data: unknown): Response {
 
 function client(outputs: unknown[], parameters: string[] = [], maxProviderTokens = 50_000) {
   const fetchMock = vi.fn<typeof fetch>();
-  fetchMock.mockResolvedValueOnce(response({ data: [{ id: DEFAULT_CRUSOE_MODEL, type: 'chat', supported_parameters: parameters, top_provider: { max_completion_tokens: maxProviderTokens } }] }));
+  fetchMock.mockResolvedValueOnce(response({ data: [{ id: DEFAULT_CRUSOE_MODEL, type: 'multimodal', tags: ['text to text', 'image text to text'], supported_parameters: parameters, top_provider: { max_completion_tokens: maxProviderTokens } }] }));
   for (const value of outputs) fetchMock.mockResolvedValueOnce(response({ choices: [{ finish_reason: 'stop', message: { content: typeof value === 'string' ? value : JSON.stringify(value) } }] }));
   return { agents: new SimulationAgents({ apiKey: 'private-simulation-key', fetch: fetchMock }), fetchMock };
 }
@@ -89,7 +91,7 @@ describe('domain-independent simulation generation', () => {
     await expect(agents.specify(goal)).resolves.toEqual(spec);
     expect(fetchMock.mock.calls.map(call => call[0])).toEqual([`${CRUSOE_BASE_URL}/models`, `${CRUSOE_BASE_URL}/chat/completions`]);
     const request = sent(fetchMock);
-    expect(request).toMatchObject({ max_completion_tokens: 16_000, reasoning_effort: 'low', chat_template_kwargs: { thinking: false }, response_format: { type: 'json_object' } });
+    expect(request).toMatchObject({ max_completion_tokens: 16_000, reasoning_effort: 'low', chat_template_kwargs: { enable_thinking: false }, response_format: { type: 'json_object' } });
     expect(request.messages[0].content).toContain('general programmable simulation engine');
     expect(request.messages[0].content).not.toContain('Trusted installed capability module documentation');
     expect(request.messages[0].content).not.toContain('arduino:avr:uno');
@@ -143,30 +145,86 @@ describe('domain-independent simulation generation', () => {
     expect(request.messages[0].content).toContain('never receive Builder source');
     expect(request.messages[0].content).toContain('every declared control must be exercised');
     expect(request.messages[0].content).not.toContain(source);
-    expect(request).toMatchObject({ reasoning_effort: 'low', chat_template_kwargs: { thinking: false } });
+    expect(request).toMatchObject({ reasoning_effort: 'low', chat_template_kwargs: { enable_thinking: false } });
     const review = sent(fetchMock, 2);
-    expect(review.chat_template_kwargs).toEqual({ thinking: true, reasoning_effort: 'low' });
+    expect(review.chat_template_kwargs).toEqual({ enable_thinking: true, medium_effort: true });
     expect(JSON.parse(review.messages[1].content)).toEqual({ goal, specification: spec, draftScenarios: scenarios });
     expect(review.messages[0].content).toContain('semantic review BEFORE tests are frozen');
     expect(review.messages[0].content).not.toContain(source);
   });
 
-  it('creates arbitrary executable source and feeds actual failures into source repair with immutable tests', async () => {
-    const repaired = { source: source.replace('10 * dt', '10 * dt + 0'), rationale: 'Repair numeric update without changing the frozen contract.' };
+  it('creates a shared controller and feeds actual failures into source repair with immutable tests', async () => {
+    const repaired = { ...output, environmentSource: portableEnvironment.replace('* dt', '* dt + 0'), rationale: 'Repair numeric update without changing the frozen contract.' };
     const { agents, fetchMock } = client([output, repaired]);
     const first = await agents.build(spec, scenarios, { attempt: 1 });
-    expect(first).toEqual({ id: 'candidate-1', ...output });
+    expect(first).toEqual(candidate());
     const failures = [{ scenarioId: 'growth-and-reset', assertionId: 'growth', observed: 100, expected: 120, passed: false }];
-    await expect(agents.build(spec, scenarios, { attempt: 2, previous: first, failures })).resolves.toEqual({ id: 'candidate-2', ...repaired });
+    await expect(agents.build(spec, scenarios, { attempt: 2, previous: first, failures })).resolves.toEqual(candidate(repaired, 2));
     expect(JSON.parse(sent(fetchMock, 2).messages[1].content)).toEqual({
-      specification: spec, scenarios, attempt: 2, previousCandidate: { source }, executionFailures: failures,
+      specification: spec, scenarios, attempt: 2, previousCandidate: { controller: portableController, environmentSource: portableEnvironment }, executionFailures: failures,
     });
     expect(sent(fetchMock, 2).messages[0].content).toContain('SAME internal state for snapshot() and draw()');
     expect(sent(fetchMock, 2).messages[0].content).toContain('step(dt)');
   });
 
+  it.each([false, true])('corrects browser-only output instead of accepting claimed hardware support (refinement: %s)', async refinement => {
+    const claimed = { ...legacyOutput, rationale: 'The simulation now includes a portable controller and supports hardware export.' };
+    const previous = refinement ? { id: 'legacy', ...legacyOutput } : undefined;
+    const { agents, fetchMock } = client([claimed, output]);
+    const result = await agents.build(spec, scenarios, { attempt: 1, previous });
+    expect(result).toEqual(candidate());
+    expect(result.source).toContain('Shared controller generated from portable IR');
+    const correction = JSON.parse(sent(fetchMock, 2).messages[1].content);
+    expect(correction.correction.validationDiagnostic).toContain('Missing portable controller:');
+    expect(correction.specification).toEqual(spec);
+    expect(correction.scenarios).toEqual(scenarios);
+    if (refinement) expect(correction.previousCandidate).toEqual({ source });
+  });
+
+  it('recovers persistent browser-only output by separating controller and environment generation', async () => {
+    const previous = { id: 'legacy', ...legacyOutput };
+    const { agents, fetchMock } = client([legacyOutput, legacyOutput, legacyOutput, controllerPart, environmentPart]);
+    await expect(agents.build(spec, scenarios, { attempt: 1, previous, previousSpec: spec })).resolves.toMatchObject({ controller: portableController, environmentSource: portableEnvironment });
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    const controllerPayload = JSON.parse(sent(fetchMock, 4).messages[1].content);
+    const environmentPayload = JSON.parse(sent(fetchMock, 5).messages[1].content);
+    expect(controllerPayload).toMatchObject({ recoveryPart: 'controller', previousSimulationSource: source, specification: spec, scenarios });
+    expect(environmentPayload).toMatchObject({ recoveryPart: 'environment', previousSimulationSource: source, frozenController: portableController, specification: spec, scenarios });
+  });
+
+  it('fails within a bounded budget if recovery still returns browser-only code', async () => {
+    const { agents, fetchMock } = client(Array.from({ length: 6 }, () => legacyOutput));
+    await expect(agents.build(spec, scenarios, { attempt: 1 })).rejects.toMatchObject({ code: 'INVALID_SIMULATION_BUILDER' });
+    expect(fetchMock).toHaveBeenCalledTimes(7);
+  });
+
+  it('preserves an existing portable controller instead of downgrading it to simulation-only', async () => {
+    const simulationOnly = { ...legacyOutput, hardwareUnavailableReason: 'A board has not been selected.' };
+    const { agents, fetchMock } = client([simulationOnly, output]);
+    await expect(agents.build(spec, scenarios, { attempt: 1, previous: candidate() })).resolves.toEqual(candidate());
+    expect(JSON.parse(sent(fetchMock, 2).messages[1].content).correction.validationDiagnostic).toContain('Preserve existing portable controllers');
+  });
+
+  it('keeps old saved source readable and requires a specific limitation for new simulation-only output', async () => {
+    expect(validateSimulationCandidate({ id: 'legacy', ...legacyOutput })).toEqual({ id: 'legacy', ...legacyOutput });
+    const unsupported = { ...legacyOutput, hardwareUnavailableReason: 'The requested control law requires unbounded dynamically generated expressions.' };
+    const { agents } = client([unsupported]);
+    await expect(agents.build(spec, scenarios, { attempt: 1 })).resolves.toEqual({ id: 'candidate-1', ...unsupported });
+  });
+
+  it('treats controller preparation as architecture instead of inventing simulated export behavior', async () => {
+    const refinementGoal = `${goal}\n\nRequested change:\nCreate a portable controller for hardware export.`;
+    const refinedSpec = { ...spec, goal: refinementGoal };
+    const { agents, fetchMock } = client([refinedSpec]);
+    await agents.specify(refinementGoal, undefined, spec);
+    const request = sent(fetchMock);
+    expect(request.messages[0].content).toContain('The application handles board selection, compilation, export and upload outside the simulation');
+    expect(request.messages[0].content).toContain('remove those artificial controls, observables and requirements');
+    expect(JSON.parse(request.messages[1].content)).toEqual({ goal: refinementGoal, previousSpecification: spec });
+  });
+
   it('keeps repair context focused and pairs previous source with its own project contract', async () => {
-    const repaired = { ...output, source: source.replace('10 * dt', '10 * dt + 0') };
+    const repaired = { ...output, environmentSource: portableEnvironment.replace('* dt', '* dt + 0') };
     const { agents, fetchMock } = client([repaired], ['chat_template_kwargs']);
     const previousSpec = { ...spec, title: 'Earlier microbe model' };
     const evidence = { passed: false, results: [{
@@ -176,9 +234,9 @@ describe('domain-independent simulation generation', () => {
         { id: 'growth', requirementIds: ['R2'], passed: false, actual: 100, message: 'Expected population 120; observed 100.' },
       ],
     }] };
-    await agents.build(spec, scenarios, { attempt: 2, previous: { id: 'candidate-1', ...output }, previousSpec, failures: evidence });
+    await agents.build(spec, scenarios, { attempt: 2, previous: candidate(), previousSpec, failures: evidence });
     const request = sent(fetchMock);
-    expect(request.chat_template_kwargs).toEqual({ thinking: true, reasoning_effort: 'low' });
+    expect(request.chat_template_kwargs).toEqual({ enable_thinking: true, medium_effort: true });
     const payload = JSON.parse(request.messages[1].content);
     expect(payload.specification).toEqual(spec);
     expect(payload.previousSpecification).toEqual(previousSpec);
@@ -190,7 +248,7 @@ describe('domain-independent simulation generation', () => {
 
   it('permits an empty acceptance suite only for an explicit unverified draft build', async () => {
     const draft = client([output]);
-    await expect(draft.agents.build(spec, [], { attempt: 1, draft: true })).resolves.toEqual({ id: 'candidate-1', ...output });
+    await expect(draft.agents.build(spec, [], { attempt: 1, draft: true })).resolves.toEqual(candidate());
     const request = sent(draft.fetchMock);
     expect(JSON.parse(request.messages[1].content)).toEqual({ specification: spec, scenarios: [], attempt: 1, draft: true });
     expect(request.messages[0].content).toContain('application will label this result unverified');
@@ -204,7 +262,7 @@ describe('domain-independent simulation generation', () => {
     await expect(invalid.agents.build({ ...spec, title: '' }, [], { attempt: 1, draft: true })).rejects.toThrow('title');
     await expect(invalid.agents.build(spec, [{ ...scenarios[0], steps: [] }], { attempt: 1, draft: true })).rejects.toThrow('Scenario steps');
     expect(invalid.fetchMock).not.toHaveBeenCalled();
-    const badSource = { source: 'No factory or executable simulation here.', rationale: 'Incomplete.' };
+    const badSource = { source: 'No factory or executable simulation here.', rationale: 'Incomplete.', hardwareUnavailableReason: 'Controller needs unbounded dynamically generated expressions.' };
     const generated = client([badSource, badSource, badSource]);
     await expect(generated.agents.build(spec, [], { attempt: 1, draft: true })).rejects.toMatchObject({ code: 'INVALID_SIMULATION_BUILDER' });
   });
@@ -264,8 +322,9 @@ describe('domain-independent simulation generation', () => {
   });
 
   it('rejects unchanged failed source even if the builder changes its rationale', async () => {
-    const previous: SimulationCandidate = { id: 'candidate-1', ...output };
-    const { agents, fetchMock } = client([output, output, output]);
+    const simulationOnly = { ...legacyOutput, hardwareUnavailableReason: 'Controller needs unbounded dynamically generated expressions.' };
+    const previous: SimulationCandidate = { id: 'candidate-1', ...simulationOnly };
+    const { agents, fetchMock } = client([simulationOnly, simulationOnly, simulationOnly]);
     await expect(agents.build(spec, scenarios, { attempt: 2, previous, failures: { error: 'bad integration' } })).rejects.toMatchObject({ code: 'INVALID_SIMULATION_BUILDER' });
     const correction = JSON.parse(sent(fetchMock, 2).messages[1].content).correction;
     expect(correction.validationDiagnostic).toContain('Make a real source change');
@@ -302,7 +361,7 @@ describe('domain-independent simulation generation', () => {
     const { agents, fetchMock } = client([invalid, invalid], ['max_completion_tokens', 'chat_template_kwargs']);
     fetchMock.mockResolvedValueOnce(response({ choices: [{ finish_reason: 'length', message: { content: 'TRUNCATED_SOURCE_MUST_NOT_BE_REUSED' } }] }));
     fetchMock.mockResolvedValueOnce(response({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(output) } }] }));
-    await expect(agents.build(spec, scenarios, { attempt: 1 })).resolves.toEqual({ id: 'candidate-1', ...output });
+    await expect(agents.build(spec, scenarios, { attempt: 1 })).resolves.toEqual(candidate());
     expect(fetchMock).toHaveBeenCalledTimes(5);
     const schemaCorrection = JSON.parse(sent(fetchMock, 3).messages[1].content).correction;
     const recoveryRequest = sent(fetchMock, 4);
@@ -313,7 +372,7 @@ describe('domain-independent simulation generation', () => {
     expect(recovery.specification).toEqual(spec);
     expect(recovery.scenarios).toEqual(scenarios);
     expect(recoveryRequest.max_completion_tokens).toBe(24_000);
-    expect(recoveryRequest.chat_template_kwargs).toEqual({ thinking: false });
+    expect(recoveryRequest.chat_template_kwargs).toEqual({ enable_thinking: false });
     expect(JSON.stringify(recoveryRequest)).not.toContain('TRUNCATED_SOURCE_MUST_NOT_BE_REUSED');
   });
 
@@ -333,7 +392,7 @@ describe('domain-independent simulation generation', () => {
   it('retains the portable builder correction allowance after malformed JSON', async () => {
     const invalidPortable = { controller: { version: 1 }, environmentSource: 'function createEnvironment(controller) {}', rationale: 'Missing controller fields.' };
     const { agents, fetchMock } = client([invalidPortable, 'malformed JSON', 'still malformed JSON', output]);
-    await expect(agents.build(spec, scenarios, { attempt: 1 })).resolves.toEqual({ id: 'candidate-1', ...output });
+    await expect(agents.build(spec, scenarios, { attempt: 1 })).resolves.toEqual(candidate());
     expect(fetchMock).toHaveBeenCalledTimes(5);
     expect(JSON.parse(sent(fetchMock, 4).messages[1].content).correction.instruction).toContain('Correction 3 of 3');
   });
@@ -372,10 +431,10 @@ describe('domain-independent simulation generation', () => {
   it('falls back to direct generation when a repair exhausts its reasoning budget', async () => {
     const { agents, fetchMock } = client([], ['max_completion_tokens', 'chat_template_kwargs']);
     fetchMock.mockResolvedValueOnce(response({ choices: [{ finish_reason: 'length', message: { content: '', reasoning_content: 'Provider exhausted its reasoning budget.' } }] }));
-    fetchMock.mockResolvedValueOnce(response({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ ...output, source: source.replace('10 * dt', '10 * dt + 0') }) } }] }));
-    await agents.build(spec, scenarios, { attempt: 2, previous: { id: 'candidate-1', ...output }, failures: { error: 'Wrong state' } });
-    expect(sent(fetchMock).chat_template_kwargs).toEqual({ thinking: true, reasoning_effort: 'low' });
-    expect(sent(fetchMock, 2).chat_template_kwargs).toEqual({ thinking: false });
+    fetchMock.mockResolvedValueOnce(response({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ ...output, environmentSource: portableEnvironment.replace('* dt', '* dt + 0') }) } }] }));
+    await agents.build(spec, scenarios, { attempt: 2, previous: candidate(), failures: { error: 'Wrong state' } });
+    expect(sent(fetchMock).chat_template_kwargs).toEqual({ enable_thinking: true, medium_effort: true });
+    expect(sent(fetchMock, 2).chat_template_kwargs).toEqual({ enable_thinking: false });
     expect(sent(fetchMock, 2).max_completion_tokens).toBe(24_000);
     expect(JSON.parse(sent(fetchMock, 2).messages[1].content).specification).toEqual(spec);
     expect(JSON.parse(sent(fetchMock, 2).messages[1].content).scenarios).toEqual(scenarios);
@@ -395,7 +454,7 @@ describe('domain-independent simulation generation', () => {
     const environmentPayload = JSON.parse(sent(fetchMock, 4).messages[1].content);
     expect(controllerPayload).toMatchObject({ recoveryPart: 'controller', specification: spec, scenarios });
     expect(environmentPayload).toMatchObject({ recoveryPart: 'environment', frozenController: portableController, specification: spec, scenarios });
-    expect(sent(fetchMock, 3).chat_template_kwargs).toEqual({ thinking: false });
+    expect(sent(fetchMock, 3).chat_template_kwargs).toEqual({ enable_thinking: false });
     expect(JSON.stringify([controllerPayload, environmentPayload])).not.toContain('TRUNCATED_DO_NOT_REUSE');
   });
 
@@ -420,8 +479,8 @@ describe('domain-independent simulation generation', () => {
       expect(payload.specification).toEqual(spec);
       expect(payload.scenarios).toEqual(scenarios);
     }
-    expect(sent(fetchMock, 5).chat_template_kwargs).toEqual({ thinking: false });
-    expect(sent(fetchMock, 6).chat_template_kwargs).toEqual({ thinking: false });
+    expect(sent(fetchMock, 5).chat_template_kwargs).toEqual({ enable_thinking: false });
+    expect(sent(fetchMock, 6).chat_template_kwargs).toEqual({ enable_thinking: false });
   });
 
   it.each(['combined', 'controller', 'environment'] as const)('stops a filtered %s builder response without further fallback', async stage => {
